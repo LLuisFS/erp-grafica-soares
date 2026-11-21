@@ -1,0 +1,13 @@
+{
+  "name": "@soares/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'Web workspace pronto para Next.js (Issue #7)'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@soares/pricing-engine": "workspace:*",
+    "@soares/shared": "workspace:*"
+  }
+}

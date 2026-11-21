@@ -1,0 +1,40 @@
+name: erp-grafica-soares
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: soares-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: soares
+      POSTGRES_PASSWORD: soares_dev_password
+      POSTGRES_DB: erp_grafica_soares
+      TZ: America/Sao_Paulo
+    volumes:
+      - soares_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soares -d erp_grafica_soares"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: soares-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - soares_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  soares_postgres_data:
+  soares_redis_data:
