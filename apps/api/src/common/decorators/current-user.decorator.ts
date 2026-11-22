@@ -1,6 +1,10 @@
 import { createParamDecorator, ExecutionContext } from "@nestjs/common";
 import { RolePermissions } from "@soares/database";
 
+/**
+ * Representação do colaborador autenticado anexada em `request.user` pela `JwtStrategy`.
+ * Consumida por guards (`RolesGuard`), interceptors (`FinancialSanitizerInterceptor`) e controllers.
+ */
 export interface AuthenticatedUser {
 	id: string;
 	email: string;
@@ -11,6 +15,10 @@ export interface AuthenticatedUser {
 	maxDiscountPct: string;
 }
 
+/**
+ * Param decorator (`@CurrentUser()`) que extrai o `request.user` já validado pelo `JwtAuthGuard`
+ * diretamente nos métodos dos controllers.
+ */
 export const CurrentUser = createParamDecorator(
 	(_data: unknown, ctx: ExecutionContext): AuthenticatedUser => {
 		const request = ctx
