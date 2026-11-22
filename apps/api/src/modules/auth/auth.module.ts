@@ -16,8 +16,7 @@ import { PasswordService } from './password.service';
         JwtModule.registerAsync({
             useFactory: () => ({
                 secret:
-                    process.env.JWT_SECRET?.trim() ||
-                    'soares-erp-jwt-secret-dev-2026-trocar-em-producao',
+                    process.env.JWT_SECRET?.trim(),
                 signOptions: {
                     expiresIn: process.env.JWT_EXPIRES_IN?.trim() || '12h',
                 },
