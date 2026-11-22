@@ -14,7 +14,7 @@ export class ZodValidationPipe implements PipeTransform {
         const result = this.schema.safeParse(value);
         if(!result.success) {
             throw new BadRequestException({
-                message: 'Erro de validade nos dados enviados',
+                message: 'Erro de validação nos dados enviados',
                 errors: result.error.flatten().fieldErrors,
             });
         }
