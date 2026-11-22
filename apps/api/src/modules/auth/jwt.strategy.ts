@@ -23,7 +23,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
             ignoreExpiration: false,
             secretOrKey:
-                process.env.JWT_SECRET?.trim() || 'soares-erp-jwt-secret-dev-2026-trocar-em-producao',
+                process.env.JWT_SECRET?.trim(),
         });
     }
 
