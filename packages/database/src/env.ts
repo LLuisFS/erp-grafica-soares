@@ -1,9 +1,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(currentDir, '../../..');
+/**
+ * Localiza a raiz do monorepo (`pnpm-workspace.yaml`) subindo diretórios a partir de `__dirname` ou `process.cwd()`.
+ * Compatível com módulos CommonJS (`@soares/api`) e ESM (`@soares/database`, `tsx`, `drizzle-kit`) sem usar `import.meta`.
+ */
+function findRepoRoot(startDir: string): string {
+    let dir = path.resolve(startDir);
+    while (true) {
+        if (fs.existsSync(path.join(dir, 'pnpm-workspace.yaml'))) {
+            return dir;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) {
+            return startDir;
+        }
+        dir = parent;
+    }
+}
+
+const repoRoot = findRepoRoot(typeof __dirname === 'string' ? __dirname : process.cwd());
 
 for (const fileName of ['.env.development', '.env']) {
     const fullPath = path.join(repoRoot, fileName);
