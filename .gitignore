@@ -1,8 +1,9 @@
-# Nestjs specific
-/dist
-/node_modules
-/build
-/tmp
+# Nestjs / Monorepo specific
+dist/
+node_modules/
+build/
+tmp/
+.turbo/
 
 # Logs
 logs
