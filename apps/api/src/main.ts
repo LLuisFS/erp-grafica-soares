@@ -1,18 +1,8 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import './env';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-
-// Carrega o .env.development da raiz do monorepo antes de iniciar a aplicação
-const repoRoot = path.resolve(__dirname, '../../..');
-for (const fileName of ['.env.development', '.env']) {
-  const fullPath = path.join(repoRoot, fileName);
-  if (fs.existsSync(fullPath) && typeof process.loadEnvFile === 'function') {
-    process.loadEnvFile(fullPath);
-  }
-}
 
 /**
  * Inicializa a aplicação NestJS (`AppModule`), habilita CORS com credenciais para o `@soares/web`,

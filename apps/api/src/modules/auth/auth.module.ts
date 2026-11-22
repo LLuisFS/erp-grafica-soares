@@ -8,17 +8,20 @@ import { PasswordService } from './password.service';
 
 /**
  * Módulo de autenticação e RBAC da API.
- * Configura `PassportModule`/`JwtModule` (via `JWT_SECRET` e `JWT_EXPIRES_IN`) e exporta `AuthService` e `PasswordService`.
+ * Configura `PassportModule`/`JwtModule` via `registerAsync` (lendo `JWT_SECRET` e `JWT_EXPIRES_IN` na inicialização do DI) e exporta `AuthService` e `PasswordService`.
  */
 @Module({
     imports: [
         PassportModule.register({ defaultStrategy: 'jwt' }),
-        JwtModule.register({
-            secret:
-                process.env.JWT_SECRET?.trim() || 'soares-erp-jwt-secret-dev-2026-trocar-em-producao',
-            signOptions: {
-                expiresIn: process.env.JWT_EXPIRES_IN?.trim() || '12h',
-            },
+        JwtModule.registerAsync({
+            useFactory: () => ({
+                secret:
+                    process.env.JWT_SECRET?.trim() ||
+                    'soares-erp-jwt-secret-dev-2026-trocar-em-producao',
+                signOptions: {
+                    expiresIn: process.env.JWT_EXPIRES_IN?.trim() || '12h',
+                },
+            }),
         }),
     ],
     controllers: [AuthController],
