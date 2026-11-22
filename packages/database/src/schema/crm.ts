@@ -71,7 +71,7 @@ export const customerPhones = pgTable(
         label: varchar('label', { length: 40 }),
         createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     },
-    (table) => [index('idx_customer_phones_e164')],
+    (table) => [index('idx_customer_phones_e164').on(table.phoneE164)],
 );
 
 // 2.4 customer_addresses

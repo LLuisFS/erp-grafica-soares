@@ -1,0 +1,1 @@
+CREATE INDEX "idx_customer_phones_e164" ON "customer_phones" USING btree ("phone_e164");
