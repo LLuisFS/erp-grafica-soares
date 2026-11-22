@@ -42,7 +42,7 @@ Representa exclusivamente os colaboradores internos da Gráfica Soares.
 | `role_id` | `UUID` (`FK -> roles.id`) | Não | Define o perfil de acesso e visibilidade de dados financeiros. |
 | `name` | `VARCHAR(120)` | Não | Nome exibido no chat, orçamentos e apontamentos de produção. |
 | `email` | `VARCHAR(150)` (`UNIQUE`) | Não | Credencial de login no painel do ERP (normalizar para lowercase). |
-| `password_hash` | `TEXT` | Não | Senha criptografada (`argon2`/`bcrypt`). Nunca retornar nas respostas da API. |
+| `password_hash` | `TEXT` | Não | Senha criptografada (`scrypt:<salt>:<key>` via `PasswordService` / `seed.ts`). Nunca retornar nas respostas da API (removida globalmente pelo `FinancialSanitizerInterceptor`). |
 | `approval_pin_hash` | `TEXT` | Sim | Hash de PIN numérico (4–6 dígitos) usado por gerentes para autorizar descontos acima da alçada. |
 | `max_discount_pct` | `NUMERIC(5,2)` (default `0.00`) | Não | Percentual máximo de desconto que este vendedor pode conceder sem pedir PIN gerencial. |
 | `commission_pct` | `NUMERIC(5,2)` (default `0.00`) | Não | Percentual de comissão calculado sobre vendas fechadas pelo usuário. |
@@ -102,14 +102,14 @@ Cadastro central de clientes (Pessoa Física ou Jurídica) para atendimento via 
 | `id` | `UUID` (`PK`) | Não | Identificador único do cliente. |
 | `price_table_id` | `UUID` (`FK -> price_tables.id`) | Não | Define qual tabela de preço o motor de orçamento carrega por padrão para este cliente. |
 | `assigned_user_id` | `UUID` (`FK -> users.id`) | Sim | Vendedor/atendente dono da carteira deste cliente. |
-| `person_type` | `VARCHAR(2)` (`CHECK 'PF'|'PJ'`) | Não | Define validação de CPF (11 dígitos) ou CNPJ (14 dígitos) no Zod. |
+| `person_type` | `VARCHAR(2)` (`CHECK 'PF'\|'PJ'`) | Sim | Define validação de CPF (11 dígitos) ou CNPJ (14 dígitos) no Zod (atualmente nullable no schema Drizzle). |
 | `name` | `VARCHAR(160)` | Não | Nome completo (PF) ou Razão Social (PJ) — usado na Nota Fiscal. |
 | `trade_name` | `VARCHAR(160)` | Sim | Nome Fantasia (PJ), útil na busca rápida do atendente. |
 | `document_cpf_cnpj` | `VARCHAR(14)` (`UNIQUE`) | Sim | **Salvar apenas dígitos** (sem `.`, `-`, `/`). Chave principal de busca quando o cliente chama de outro telefone e para emissão de NF. |
 | `state_registration` | `VARCHAR(30)` | Sim | Inscrição Estadual (ou `'ISENTO'`), exigida na emissão de NF-e para PJ. |
 | `email` | `VARCHAR(150)` | Sim | Destino para envio de DANFE/XML de Nota Fiscal (não usado para login). |
 | `whatsapp_phone` | `VARCHAR(20)` (`INDEX`) | Não | Telefone principal no formato E.164 (ex.: `5561999998888`). |
-| `billing_type` | `VARCHAR(20)` (`CHECK`) | Não | `'AVISTA'` (exige pagamento antes de gerar OS) ou `'FATURADO_MENSAL'` (clientes PJ com contrato). |
+| `billing_type` | `VARCHAR(20)` (`CHECK`, default `'AVISTA'`) | Não | `'AVISTA'` (exige pagamento antes de gerar OS) ou `'FATURADO_MENSAL'` (clientes PJ com contrato). |
 | `credit_limit` | `NUMERIC(12,2)` (default `0.00`) | Não | Limite de crédito aprovado para clientes `FATURADO_MENSAL`. |
 | `notes` | `TEXT` | Sim | Observações internas de atendimento ou preferências de acabamento. |
 | `created_at` | `TIMESTAMPTZ` | Não | Data de cadastro. |
