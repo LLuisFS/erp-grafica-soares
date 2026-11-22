@@ -3,10 +3,10 @@ import { ZodSchema } from 'zod';
 
 /**
  * Pipe NestJS que integra os schemas Zod de `@soares/shared` à validação de entrada dos controllers
- * (ex.: `@Body(new ZodValidationPite(loginSchema))`).
+ * (ex.: `@Body(new ZodValidationPipe(loginSchema))`).
  */
 @Injectable()
-export class ZodValidationPite implements PipeTransform {
+export class ZodValidationPipe implements PipeTransform {
     constructor(private readonly schema: ZodSchema) {}
 
     /** Valida e transforma o payload recebido; lança 400 com `fieldErrors` caso o schema falhe. */
