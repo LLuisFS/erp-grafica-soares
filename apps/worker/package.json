@@ -1,0 +1,13 @@
+{
+  "name": "@soares/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'Worker workspace pronto para BullMQ (Issue #10)'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@soares/database": "workspace:*",
+    "@soares/shared": "workspace:*"
+  }
+}

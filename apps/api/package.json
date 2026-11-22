@@ -1,0 +1,14 @@
+{
+  "name": "@soares/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'API workspace pronto para NestJS (Issue #3)'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@soares/database": "workspace:*",
+    "@soares/pricing-engine": "workspace:*",
+    "@soares/shared": "workspace:*"
+  }
+}

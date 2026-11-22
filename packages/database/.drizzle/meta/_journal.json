@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1795303722673,
+      "tag": "0000_init_core_crm_engineering",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795305246303,
+      "tag": "0001_fix_column_typos",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795306369768,
+      "tag": "0002_add_customer_phones_index",
+      "breakpoints": true
+    }
+  ]
+}
