@@ -31,12 +31,21 @@ import {
 } from '@soares/shared';
 import { DRIZZLE_DB } from '../../database/database.module';
 
+/** Origem do match encontrado em `CustomersService.lookup` para orientar o atendimento omnichannel (RF02). */
 export type LookupMatchSource = 'WHATSAPP_PRIMARY' | 'SECONDARY_PHONE' | 'DOCUMENT';
 
+/**
+ * Serviço de domínio do CRM interno (`customers`, `customer_phones`, `customer_addresses`).
+ * Consome `DRIZZLE_DB` (`@soares/database`) e contratos normalizados de `@soares/shared` para busca omnichannel e gestão fiscal.
+ */
 @Injectable()
 export class CustomersService {
     constructor(@Inject(DRIZZLE_DB) private readonly db: Database) { }
 
+    /**
+     * Busca hierárquica para o atendimento WhatsApp (RF02): telefone principal -> telefone secundário -> CPF/CNPJ.
+     * Sinaliza `isNewPhoneCustomer` quando o cliente foi encontrado pelo documento mas entrou por um número novo.
+     */
     async lookup(query: LookupCustomerQuery) {
         let customerId: string | null = null;
         let matchedBy: LookupMatchSource | null = null;
@@ -98,6 +107,7 @@ export class CustomersService {
         };
     }
 
+    /** Lista clientes com paginação, filtros (`personType`, `billingType`) e busca textual/numérica em paralelo com `COUNT(*)`. */
     async list(query: ListCustomersQuery) {
         const conditions = [];
 
@@ -162,6 +172,7 @@ export class CustomersService {
         };
     }
 
+    /** Carrega o cliente completo com tabela de preço, vendedor responsável, telefones e endereços; lança 404 se inexistente. */
     async findById(id: string) {
         const customer = await this.db.query.customers.findFirst({
             where: eq(customers.id, id),
@@ -186,6 +197,10 @@ export class CustomersService {
         return customer;
     }
 
+    /**
+     * Cadastra cliente PF/PJ com telefones e endereços iniciais em transação atômica.
+     * Aplica fallback da tabela de preço ativa e vincula `currentUserId` caso `assignedUserId` não seja informado.
+     */
     async create(input: CreateCustomerInput, currentUserId: string) {
         if (input.documentCpfCnpj) {
             await this.ensureDocumentAvailable(input.whatsappPhone);
@@ -257,6 +272,7 @@ export class CustomersService {
         return this.findById(createdId);
     }
 
+    /** Atualiza parcialmente um cliente, revalidando consistência PF/PJ com CPF/CNPJ e unicidade de documento/WhatsApp. */
     async update(id: string, input: UpdateCustomerInput) {
         const existing = await this.findById(id);
 
@@ -302,12 +318,14 @@ export class CustomersService {
         return this.findById(id);
     }
 
+    /** Remove o cadastro do cliente (telefones e endereços filhos são apagados em cascata pela FK `ON DELETE CASCADE`). */
     async remove(id: string) {
         await this.findById(id);
         await this.db.delete(customers).where(eq(customers.id, id));
         return { deleted: true, id };
     }
 
+    /** Vincula um telefone secundário E.164 (`customer_phones`), bloqueando conflitos em qualquer cliente com 409. */
     async addPhone(customerId: string, input: CustomerPhoneInput) {
         const customer = await this.findById(customerId);
 
@@ -338,6 +356,7 @@ export class CustomersService {
         return created;
     }
 
+    /** Desvincula um telefone secundário garantindo que pertença ao `customerId` informado. */
     async removePhone(customerId: string, phoneId: string) {
         await this.findById(customerId);
         const [deleted] = await this.db
@@ -352,6 +371,7 @@ export class CustomersService {
         return { deleted: true, id: deleted.id };
     }
 
+    /** Adiciona endereço de entrega/cobrança (`customer_addresses`) ao cliente. */
     async addAddress(customerId: string, input: CustomerAddressInput) {
         await this.findById(customerId);
 
@@ -374,6 +394,7 @@ export class CustomersService {
         return created;
     }
 
+    /** Atualiza parcialmente um endereço garantindo o vínculo com `customerId`. */
     async updateAddress(customerId: string, addressId: string, input: UpdateCustomerAddressInput) {
         await this.findById(customerId);
 
@@ -400,6 +421,7 @@ export class CustomersService {
         return updated;
     }
 
+    /** Remove um endereço específico do cliente; lança 404 caso não pertença ao `customerId`. */
     async removeAddress(customerId: string, addressId: string) {
         await this.findById(customerId);
 
@@ -417,6 +439,7 @@ export class CustomersService {
         return { deleted: true, id: deleted.id };
     }
 
+    /** Garante unicidade de CPF/CNPJ e devolve o cliente conflitante em 409 para facilitar unificação no atendimento. */
     private async ensureDocumentAvailable(documentCpfCnpj: string, ignoreCustomerId?: string) {
         const condition = ignoreCustomerId
             ? and(
@@ -445,6 +468,7 @@ export class CustomersService {
         }
     }
 
+    /** Valida que o telefone E.164 não está em uso em `customers.whatsapp_phone` nem em `customer_phones`. */
     private async ensurePhoneAvailable(phoneE164: string, ignoreCustomerId?: string) {
         const primaryCondition = ignoreCustomerId
             ? and(eq(customers.whatsappPhone, phoneE164), ne(customers.id, ignoreCustomerId))
@@ -497,6 +521,7 @@ export class CustomersService {
         }
     }
 
+    /** Seleciona a primeira tabela de preço ativa (ex.: Balcão do seed) como padrão quando `priceTableId` é omitido. */
     private async getDefaultPriceTableId(): Promise<string> {
         const [balcao] = await this.db
             .select({ id: priceTables.id })

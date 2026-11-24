@@ -40,12 +40,17 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { CustomersService } from './customers.service';
 
+/**
+ * Controller `/customers` do CRM Interno (protegido por JWT global + RBAC `crm.view` / `crm.manage`).
+ * Valida entradas via `ZodValidationPipe` com schemas de `@soares/shared` e expõe contratos OpenAPI no Swagger.
+ */
 @ApiTags('CRM Interno — Clientes')
 @ApiBearerAuth()
 @Controller('customers')
 export class CustomersController {
     constructor(private readonly customersService: CustomersService) { }
 
+    /** Lookup omnichannel (RF02): identifica cliente por telefone E.164 ou CPF/CNPJ. */
     @Get('lookup')
     @RequirePermissions('crm.view')
     @ApiOperation({
@@ -58,6 +63,7 @@ export class CustomersController {
         return this.customersService.lookup(query);
     }
 
+    /** Listagem paginada de clientes com filtros (`listCustomersQuerySchema`). */
     @Get()
     @RequirePermissions('crm.view')
     @ApiOperation({ summary: 'Lista clientes internos com paginação e filtro por nome/CPF/telefone' })
@@ -70,6 +76,7 @@ export class CustomersController {
         return this.customersService.list(query);
     }
 
+    /** Detalhe completo do cliente (tabela de preço, vendedor, telefones e endereços). */
     @Get(':id')
     @RequirePermissions('crm.view')
     @ApiOperation({
@@ -79,6 +86,7 @@ export class CustomersController {
         return this.customersService.findById(id);
     }
 
+    /** Cria cliente PF/PJ associando o usuário autenticado (`@CurrentUser()`) como responsável padrão. */
     @Post()
     @RequirePermissions('crm.manage')
     @ApiOperation({ summary: 'Cadastra novo cliente PF ou PJ (com telefones e endereços opcionais)' })
@@ -124,6 +132,7 @@ export class CustomersController {
         return this.customersService.create(body, user.id);
     }
 
+    /** Atualização parcial dos dados cadastrais e fiscais do cliente (`updateCustomerSchema`). */
     @Patch(':id')
     @RequirePermissions('crm.manage')
     @ApiOperation({ summary: 'Atualiza dados cadastrais e fiscais de um cliente' })
@@ -153,6 +162,7 @@ export class CustomersController {
         return this.customersService.update(id, body);
     }
 
+    /** Exclui o cliente e seus vínculos em cascata (`customer_phones` e `customer_addresses`). */
     @Delete(':id')
     @RequirePermissions('crm.manage')
     @ApiOperation({ summary: 'Remove um cadastro de cliente' })
@@ -160,6 +170,7 @@ export class CustomersController {
         return this.customersService.remove(id);
     }
 
+    /** Vincula novo telefone secundário normalizado em E.164 ao cliente. */
     @Post(':id/phones')
     @RequirePermissions('crm.manage')
     @ApiOperation({
@@ -182,6 +193,7 @@ export class CustomersController {
         return this.customersService.addPhone(id, body);
     }
 
+    /** Remove um telefone secundário vinculado ao cliente. */
     @Delete(':id/phones/:phoneId')
     @RequirePermissions('crm.manage')
     @ApiOperation({ summary: 'Remove um telefone secundário vinculado ao cliente' })
@@ -192,6 +204,7 @@ export class CustomersController {
         return this.customersService.removePhone(id, phoneId);
     }
 
+    /** Cadastra novo endereço fiscal/entrega vinculado ao cliente. */
     @Post(':id/addresses')
     @RequirePermissions('crm.manage')
     @ApiOperation({ summary: 'Adiciona um endereço de entrega/cobrança ao cliente' })
@@ -219,6 +232,7 @@ export class CustomersController {
         return this.customersService.addAddress(id, body);
     }
 
+    /** Atualiza parcialmente um endereço específico do cliente. */
     @Patch(':id/addresses/:addressId')
     @RequirePermissions('crm.manage')
     @ApiOperation({ summary: 'Atualiza um endereço existente do cliente' })
@@ -246,6 +260,7 @@ export class CustomersController {
         return this.customersService.updateAddress(id, addressId, body);
     }
 
+    /** Remove um endereço específico do cliente. */
     @Delete(':id/addresses/:addressId')
     @RequirePermissions('crm.manage')
     @ApiOperation({ summary: 'Remove um endereço do cliente' })

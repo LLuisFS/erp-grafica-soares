@@ -2,7 +2,7 @@
 
 ## 1. Cabeçalho Técnico
 
-- **Caminho no repositório:** `packages/shared/src/` (`index.ts`, `permissions.ts`, `auth.schemas.ts`)
+- **Caminho no repositório:** `packages/shared/src/` (`index.ts`, `permissions.ts`, `auth.schemas.ts`, `customers.schemas.ts`)
 - **Forma de importação:**
   ```ts
   import {
@@ -12,13 +12,21 @@
     FINANCIAL_RESTRICTED_ROLES,
     loginSchema,
     verifyPinSchema,
+    createCustomerSchema,
+    updateCustomerSchema,
+    lookupCustomerQuerySchema,
+    listCustomersQuerySchema,
+    onlyDigits,
+    normalizePhoneE164,
+    isValidCpfOrCnpj,
     type PermissionKey,
     type RoleName,
     type LoginInput,
     type VerifyPinInput,
+    type CreateCustomerInput,
   } from '@soares/shared';
   ```
-- **Issue(s) relacionada(s):** Issue #1 (Workspace Shared), Issue #3 (Contratos Zod de Auth e Catálogo RBAC) e Issue #6 (Consistência de Perfis/Permissões no Seed)
+- **Issue(s) relacionada(s):** Issue #1 (Workspace Shared), Issue #3 (Contratos Zod de Auth e Catálogo RBAC), Issue #4 (Schemas de CRM, Validação CPF/CNPJ e Normalização E.164) e Issue #6 (Consistência de Perfis/Permissões no Seed)
 - **Responsabilidade:** Centralizar a fonte única de verdade (SSOT) de contratos de validação Zod, catálogo de permissões RBAC e constantes de cargos compartilhados entre `@soares/api`, `@soares/database`, `@soares/pricing-engine`, `@soares/web` e `@soares/worker`.
 
 ---
@@ -27,8 +35,9 @@
 
 ```text
                 packages/shared/src/index.ts (Barrel Export)
-                     ├── permissions.ts (Catálogo RBAC + Cargos)
-                     └── auth.schemas.ts (Contratos Zod de Login e PIN)
+                     ├── permissions.ts       (Catálogo RBAC + Cargos)
+                     ├── auth.schemas.ts      (Contratos Zod de Login e PIN)
+                     └── customers.schemas.ts (CPF/CNPJ, E.164 e CRUD CRM)
                                      │
           ┌──────────────────────────┼──────────────────────────┐
           │                          │                          │
@@ -60,6 +69,12 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | `LoginInput` | `type` (`z.infer`) | `packages/shared/src/auth.schemas.ts` | Tipo TypeScript inferido diretamente de `loginSchema`. |
 | `verifyPinSchema` | `ZodObject` | `packages/shared/src/auth.schemas.ts` | Valida e normaliza o payload de `POST /auth/verify-pin`. |
 | `VerifyPinInput` | `type` (`z.infer`) | `packages/shared/src/auth.schemas.ts` | Tipo TypeScript inferido diretamente de `verifyPinSchema`. |
+| `onlyDigits`, `isValidCpf`, `isValidCnpj`, `isValidCpfOrCnpj`, `normalizePhoneE164` | Funções puras | `packages/shared/src/customers.schemas.ts` | Utilitários de sanitização numérica, dígito verificador (CPF/CNPJ) e normalização telefônica E.164. |
+| `phoneE164Schema`, `cpfCnpjSchema` | `ZodEffects` | `packages/shared/src/customers.schemas.ts` | Primitivos reutilizáveis para telefone E.164 (12–15 dígitos) e CPF/CNPJ válido. |
+| `customerPhoneInputSchema` / `CustomerPhoneInput` | `ZodObject` / `type` | `packages/shared/src/customers.schemas.ts` | Contrato de cadastro de telefones secundários (`customer_phones`). |
+| `customerAddressInputSchema` / `updateCustomerAddressSchema` | `ZodObject` / `type` | `packages/shared/src/customers.schemas.ts` | Contratos de criação e edição parcial de endereços (`customer_addresses`). |
+| `createCustomerSchema` / `updateCustomerSchema` | `ZodEffects` / `type` | `packages/shared/src/customers.schemas.ts` | Contratos de criação e atualização parcial de clientes com validação cruzada `PF`/`PJ` ↔ CPF/CNPJ. |
+| `lookupCustomerQuerySchema` / `listCustomersQuerySchema` | `ZodEffects` / `ZodObject` | `packages/shared/src/customers.schemas.ts` | Contratos de query string para lookup omnichannel (RF02) e listagem paginada do CRM. |
 
 ---
 
@@ -106,6 +121,18 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | `managerEmail` | `z.string().trim().toLowerCase().email().optional()` | Padrão Zod e-mail | Não |
 
 > **Regra de negócio:** Se `managerUserId` ou `managerEmail` for informado, o `AuthService.verifyPin` valida apenas aquele gerente específico; se ambos forem omitidos, tenta validar contra todos os aprovadores ativos com PIN cadastrado (priorizando o usuário autenticado).
+
+### 4.4 Schemas Zod e Sanitizadores de Clientes (`customers.schemas.ts`)
+
+| Schema / Função | Regras de Sanitização e Validação | Defaults / Observações |
+| :--- | :--- | :--- |
+| `phoneE164Schema` | `.trim()` → `normalizePhoneE164` (remove não dígitos e zeros à esquerda; prefixa `55` em 10/11 dígitos) → `/^\d{12,15}$/` | Compatível com `customers.whatsapp_phone`, `customer_phones.phone_e164` e webhooks Meta/Evolution. |
+| `cpfCnpjSchema` | `.trim()` → `onlyDigits` → `11` ou `14` dígitos → `isValidCpfOrCnpj` (rejeita sequências repetidas e valida dígitos verificadores) | Salva sempre apenas dígitos em `customers.document_cpf_cnpj`. |
+| `customerAddressInputSchema` | `addressType` (`ENTREGA\|COBRANCA\|AMBOS`), `zipCode` (`onlyDigits`, exatos 8 dígitos), `state` (`.toUpperCase()` + `/^[A-Z]{2}$/`), `defaultDeliveryFee` (`Number(v).toFixed(2)`, `>= 0`) | Defaults: `addressType: 'AMBOS'`, `defaultDeliveryFee: '0.00'`. |
+| `createCustomerSchema` | Campos de `customers` + arrays opcionais `phones` e `addresses` + `.superRefine` cruzando `personType` (`PF` = 11 dígitos; `PJ` = 14 dígitos) | Defaults: `billingType: 'AVISTA'`, `creditLimit: '0.00'`, `phones: []`, `addresses: []`. |
+| `updateCustomerSchema` | Todos os campos opcionais + `.superRefine` validando `personType` ↔ `documentCpfCnpj` quando ambos são enviados | Usado em `PATCH /customers/:id`. |
+| `lookupCustomerQuerySchema` | `phone` (`normalizePhoneE164`, opcional) e `document` (`onlyDigits`, opcional) + `.refine` exigindo ao menos um dos dois | Usado em `GET /customers/lookup` (RF02). |
+| `listCustomersQuerySchema` | `search` (opcional), `personType`, `billingType`, `page` (`z.coerce.number().int().min(1)`), `limit` (`min(1).max(100)`) | Defaults: `page: 1`, `limit: 20`. |
 
 ---
 

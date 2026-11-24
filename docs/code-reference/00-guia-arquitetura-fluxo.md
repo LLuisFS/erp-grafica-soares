@@ -8,7 +8,7 @@
   import { loginSchema, PermissionKey } from '@soares/shared';
   import { db, users, roles, eq } from '@soares/database';
   ```
-- **Issue(s) relacionada(s):** Issue #1 (Fundação do Monorepo e Docker), Issue #2 (Schema Drizzle Bloco 1.1), Issue #3 (Núcleo NestJS, Auth JWT e RBAC) e Issue #6 (Seed Idempotente)
+- **Issue(s) relacionada(s):** Issue #1 (Fundação do Monorepo e Docker), Issue #2 (Schema Drizzle Bloco 1.1), Issue #3 (Núcleo NestJS, Auth JWT e RBAC), Issue #4 (Módulo CRM Interno & Clientes) e Issue #6 (Seed Idempotente)
 - **Responsabilidade:** Orquestrar os 6 workspaces TypeScript do monorepo (`pnpm` + `Turborepo`) sobre PostgreSQL 16 e Redis 7 locais via Docker, padronizando o ciclo de vida de inicialização de variáveis de ambiente e o pipeline global de segurança de cada requisição HTTP na API NestJS.
 
 ---
@@ -170,7 +170,7 @@ tsx dist/main.js                    (2. Executa JS compilado + transpila @soares
 - **Assinatura exata:**
   ```ts
   @Module({
-    imports: [DatabaseModule, AuthModule],
+    imports: [DatabaseModule, AuthModule, CustomersModule],
     controllers: [HealthController],
     providers: [
       { provide: APP_GUARD, useClass: JwtAuthGuard },
