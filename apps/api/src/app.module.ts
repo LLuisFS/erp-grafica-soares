@@ -7,6 +7,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { FinancialSanitizerInterceptor } from './common/interceptors/financial-sanitizer.interceptor';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CustomersModule } from './modules/customers/customers.module';
 
 /** Controller público (`GET /health`) para verificação de disponibilidade da API. */
 @ApiTags('Sistema')
@@ -29,7 +30,7 @@ class HealthController {
  * Conecta `DatabaseModule` (@Global) e módulos de domínio (`AuthModule`) e registra o pipeline global de segurança.
  */
 @Module({
-  imports: [DatabaseModule, AuthModule],
+  imports: [DatabaseModule, AuthModule, CustomersModule],
   controllers: [HealthController],
   providers: [
     // A ordem importa: JwtAuthGuard popula `request.user` antes do RolesGuard validar permissões
