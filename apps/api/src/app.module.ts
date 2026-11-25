@@ -27,7 +27,7 @@ class HealthController {
 
 /**
  * Módulo raiz da API REST.
- * Conecta `DatabaseModule` (@Global) e módulos de domínio (`AuthModule`) e registra o pipeline global de segurança.
+ * Conecta `DatabaseModule` (@Global) e módulos de domínio (`AuthModule`, `CustomersModule`) e registra o pipeline global de segurança.
  */
 @Module({
   imports: [DatabaseModule, AuthModule, CustomersModule],

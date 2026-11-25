@@ -32,8 +32,9 @@
   ┌─────────────────────────────────────────────────────────────────────┐
   │ APP_GUARD #2: RolesGuard                                            │
   │   Reflector.getAllAndOverride(REQUIRED_PERMISSIONS_KEY)             │
-  │     ├── vazio ou permissions['system.all'] === true ──► Libera      │
-  │     └── exige .every(p => permissions[p] === true) ──► ou 403       │
+  │     ├── vazio ────────────────────────────────────────► Libera      │
+  │     └── hasPermission(): system.all | chave exata |                 │
+  │         herança *.manage -> *.view ──────────────────► ou 403       │
   └──────────────────────────────────┬──────────────────────────────────┘
                                      ▼
   ┌─────────────────────────────────────────────────────────────────────┐
@@ -179,7 +180,7 @@ A sanitização financeira entra em ação se o usuário autenticado pertencer a
     canActivate(context: ExecutionContext): boolean;
   }
   ```
-- **O que faz:** Lê `REQUIRED_PERMISSIONS_KEY` via `Reflector`. Se vazio, libera; se `user.permissions['system.all'] === true`, libera; caso contrário exige `requiredPermissions.every((p) => user.permissions?.[p] === true)`.
+- **O que faz:** Lê `REQUIRED_PERMISSIONS_KEY` via `Reflector`. Se vazio, libera; caso contrário exige `requiredPermissions.every((p) => hasPermission(user.permissions, p))`. A função interna `hasPermission` libera quando `permissions['system.all'] === true`, quando a chave exata é `true`, ou por **herança de escrita para leitura** (se a rota exige `*.view` e o usuário possui `*.manage`, ex.: `crm.manage` satisfaz `crm.view`).
 - **Como implementar:** Registrado globalmente como segundo `APP_GUARD` em `AppModule`.
 - **Exceções / Status HTTP:**
   - `403 Forbidden` — `'Usuário não autenticado.'` (se faltar `request.user`).
