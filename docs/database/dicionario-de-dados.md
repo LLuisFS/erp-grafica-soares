@@ -6,7 +6,7 @@ Documentação completa das **38 tabelas** do banco de dados relacional (`Postgr
 
 ## Regras Arquiteturais Globais
 
-- **Chaves Primárias (`UUID`):** Todas as tabelas utilizam `gen_random_uuid()` para evitar enumeração sequencial em rotas públicas (`/upload/[token]`, `/aprovar/[token]`) e permitir geração antecipada de IDs na aplicação.
+- **Chaves Primárias (`UUID`):** Todas as tabelas utilizam `gen_random_uuid()` para evitar enumeração sequencial em rotas públicas (`/upload/[token]`, `/proposta/[token]`, `/aprovacao/[token]`) e permitir geração antecipada de IDs na aplicação.
 - **Timestamps com Fuso (`TIMESTAMPTZ`):** Armazenados em UTC no PostgreSQL e formatados para `America/Sao_Paulo` na interface.
 - **Valores Monetários (`NUMERIC(12,2)` / `NUMERIC(12,4)`):** Custos unitários de insumos/cliques utilizam 4 casas decimais (`scale: 4`) para evitar erro de arredondamento em altas tiragens; totais financeiros utilizam 2 casas (`scale: 2`).
 - **Fronteira Equipe vs. Cliente:** `users` autentica exclusivamente a equipe interna da gráfica; `customers` não possui login no ERP (o acesso futuro do e-commerce fica isolado em `customer_auth_accounts`).
@@ -46,7 +46,7 @@ Representa exclusivamente os colaboradores internos da Gráfica Soares.
 | `approval_pin_hash` | `TEXT` | Sim | Hash de PIN numérico (4–6 dígitos) usado por gerentes para autorizar descontos acima da alçada. |
 | `max_discount_pct` | `NUMERIC(5,2)` (default `0.00`) | Não | Percentual máximo de desconto que este vendedor pode conceder sem pedir PIN gerencial. |
 | `commission_pct` | `NUMERIC(5,2)` (default `0.00`) | Não | Percentual de comissão calculado sobre vendas fechadas pelo usuário. |
-| `active` | `BOOLEAN` (default `true`) | Não | Inativação lógica; bloqueia login imediatamente sem quebrar o histórico de OSs antigas. |
+| `active` | `BOOLEAN` (default `true`) | Não | Inativação lógica exclusiva via `PATCH /users/:id/status` (proibido `DELETE` físico para preservar autoria histórica de OSs, orçamentos e auditoria); bloqueia login imediatamente na `JwtStrategy`. |
 | `created_at` | `TIMESTAMPTZ` | Não | Data de cadastro do colaborador. |
 | `updated_at` | `TIMESTAMPTZ` | Sim | Última atualização cadastral ou de senha. |
 
@@ -206,7 +206,8 @@ Representa cada ticket/conversa de atendimento no WhatsApp.
 | `wa_phone` | `VARCHAR(20)` (`INDEX`) | Não | Número de origem do WhatsApp em formato E.164. |
 | `wa_profile_name` | `VARCHAR(120)` | Sim | Nome público exibido no perfil do WhatsApp do contato. |
 | `status` | `VARCHAR(25)` (`CHECK`) | Não | `'BOT'`, `'FILA'`, `'EM_ATENDIMENTO'` ou `'ENCERRADO'`. |
-| `window_expires_at` | `TIMESTAMPTZ` | Sim | Timestamp da última mensagem recebida + 24h. Se expirado, a API Oficial da Meta exige uso de `wa_notification_templates`. |
+| `last_customer_message_at` | `TIMESTAMPTZ` | Sim | Timestamp da última mensagem recebida do cliente (`INBOUND`); serve de referência auditável para o cálculo da janela de 24h. |
+| `window_expires_at` | `TIMESTAMPTZ` | Sim | `last_customer_message_at + 24h`. Se expirado (`< now()`), a API Oficial da Meta exige uso de `wa_notification_templates`. |
 | `unread_count` | `INTEGER` (default `0`) | Não | Contador de mensagens não lidas exibido no badge da caixa de entrada. |
 | `last_message_at` | `TIMESTAMPTZ` | Não | Usado para ordenar a lista de conversas da mais recente para a mais antiga. |
 | `created_at` | `TIMESTAMPTZ` | Não | Abertura do ticket. |
@@ -295,8 +296,8 @@ Papéis, lonas, vinis, chapas rígidas, tintas e embalagens com conversão autom
 | `width_mm` | `INTEGER` | Sim | Largura da folha ou da bobina em milímetros (usada no cálculo de imposição). |
 | `height_mm` | `INTEGER` | Sim | Altura da folha em milímetros (`NULL` quando for bobina contínua). |
 | `grammage_gsm` | `INTEGER` | Sim | Gramatura em $g/m^2$ (ex.: `90`, `150`, `300`). |
-| `unit_cost` | `NUMERIC(12,4)` | Não | Custo unitário já convertido na `consumption_unit` (custo por 1 folha ou 1 $m^2$). |
-| `stock_qty` | `NUMERIC(12,4)` (default `0`) | Não | Saldo físico atual na `consumption_unit`. |
+| `unit_cost` | `NUMERIC(12,4)` | Não | Custo unitário convertido na `consumption_unit` (calculado automaticamente pela API como `purchase_price / conversion_factor`, com fallback a envio direto). |
+| `stock_qty` | `NUMERIC(12,4)` (default `0`) | Não | Saldo físico atual na `consumption_unit` (alterado exclusivamente via `POST /engineering/materials/:id/stock-adjustment` ou movimentações de estoque). |
 | `min_stock_qty` | `NUMERIC(12,4)` (default `0`) | Não | Ponto de reposição que dispara alerta de compra. |
 | `active` | `BOOLEAN` (default `true`) | Não | Status ativo no catálogo. |
 | `deactivated_at` | `TIMESTAMPTZ` | Sim | Timestamp da última desativação lógica via `PATCH /engineering/materials/:id/status` (`NULL` quando ativo). |
@@ -365,7 +366,7 @@ Fornecedores de insumos (papéis, tintas) e parceiros de acabamentos/impressões
 ```
 
 ### 5.1 `quotes` `[Modelada SQL — Bloco 1.3]`
-Cabeçalho da proposta comercial enviada ao cliente. Funciona como contêiner inicial dos arquivos antes do pagamento gerar a OS.
+Cabeçalho da proposta comercial enviada ao cliente. Funciona como contêiner inicial dos arquivos antes do pagamento gerar a OS (disponível também no link público `/proposta/[token]`; **proibido `DELETE` físico** na aplicação).
 - **Relacionamentos:** `N:1` com `customers`, `users` (`user_id` e `discount_authorized_by`) e `wa_conversations`; `1:N` com `quote_items`, `artwork_files`, `financial_titles` e `service_orders`.
 
 | Coluna | Tipo / Restrições | Nulo? | Para que serve & Regra no Código |
@@ -375,7 +376,7 @@ Cabeçalho da proposta comercial enviada ao cliente. Funciona como contêiner in
 | `customer_id` | `UUID` (`FK -> customers.id`) | Não | Cliente destinatário da proposta. |
 | `user_id` | `UUID` (`FK -> users.id`) | Não | Atendente/vendedor que elaborou o orçamento. |
 | `conversation_id` | `UUID` (`FK -> wa_conversations.id`) | Sim | Conversa do WhatsApp de origem (permite disparar proposta e cobrança no chat certo). |
-| `status` | `VARCHAR(25)` (`CHECK`) | Não | Ciclo de vida: `'RASCUNHO'`, `'ENVIADO'`, `'NEGOCIACAO'`, `'AGUARDANDO_PAGAMENTO'`, `'PAGO_CONVERTIDO'`, `'PERDIDO'`, `'EXPIRADO'`. |
+| `status` | `VARCHAR(25)` (`CHECK`) | Não | Ciclo de vida: `'RASCUNHO'`, `'ENVIADO'`, `'NEGOCIACAO'`, `'AGUARDANDO_PAGAMENTO'`, `'PAGO_CONVERTIDO'`, `'PERDIDO'`, `'EXPIRADO'` ou `'CANCELADO'` (cancelamento/arquivamento sem `DELETE` físico). |
 | `loss_reason` | `VARCHAR(120)` | Sim | Motivo obrigatório quando `status = 'PERDIDO'` (ex.: `'Preço'`, `'Prazo'`). |
 | `valid_until` | `DATE` | Não | Data limite de validade da proposta; bloqueia aprovação direta se vencida. |
 | `approved_at` | `TIMESTAMPTZ` | Sim | Timestamp exato em que o cliente clicou em `[Aprovar Orçamento]`. |
@@ -506,7 +507,7 @@ Ordem de Serviço de produção. **Só nasce após confirmação do pagamento (`
 ---
 
 ### 6.2 `artwork_files` `[Modelada SQL — Bloco 1.2]`
-Repositório versionado de arquivos gráficos no Cloudflare R2. Nasce ligado ao `quote_id` quando o cliente manda os arquivos no WhatsApp e herda o `service_order_id` após o pagamento.
+Repositório versionado de arquivos gráficos no Cloudflare R2. Nasce ligado ao `quote_id` quando o cliente manda os arquivos no WhatsApp e herda o `service_order_id` após o pagamento. **Proibido `DELETE` físico na aplicação** (histórico preservado para auditoria e reimpressão; `ON DELETE CASCADE` mantido apenas como integridade estrutural caso ocorra limpeza em ambiente de teste).
 - **Relacionamentos:** `N:1` com `quotes` (`ON DELETE CASCADE`), `service_orders` (opcional) e `users`; `1:N` com `wa_media_attachments` e `artwork_approvals`.
 
 | Coluna | Tipo / Restrições | Nulo? | Para que serve & Regra no Código |
@@ -528,7 +529,7 @@ Repositório versionado de arquivos gráficos no Cloudflare R2. Nasce ligado ao 
 ---
 
 ### 6.3 `wa_media_attachments` `[Modelada SQL — Bloco 1.2]`
-Metadados de cada mídia recebida no WhatsApp e resultado da inspeção automática de resolução feita pelo worker (`Sharp`).
+Metadados de cada mídia recebida no WhatsApp e resultado da inspeção automática de resolução feita pelo worker (`Sharp`). **Proibido `DELETE` físico na aplicação** para preservar o histórico probatório das conversas.
 - **Relacionamentos:** `N:1` com `wa_messages` (`ON DELETE CASCADE`) e `artwork_files` (opcional).
 
 | Coluna | Tipo / Restrições | Nulo? | Para que serve & Regra no Código |
@@ -556,7 +557,7 @@ Registro jurídico imutável de aceite da prova digital pelo cliente.
 | `id` | `UUID` (`PK`) | Não | Identificador do protocolo de aprovação. |
 | `service_order_id` | `UUID` (`FK -> service_orders.id`) | Não | OS aguardando aprovação de layout. |
 | `artwork_file_id` | `UUID` (`FK -> artwork_files.id`) | Não | Versão exata da prova (`file_stage = 'PROVA_DIGITAL'`) submetida ao cliente. |
-| `approval_token` | `UUID` (`UNIQUE`) | Não | Token público da URL `/aprovar/[token]`. |
+| `approval_token` | `UUID` (`UNIQUE`) | Não | Token público da URL `/aprovacao/[token]`. |
 | `status` | `VARCHAR(25)` (`CHECK`) | Não | `'PENDENTE'`, `'APROVADO'` ou `'ALTERACAO_SOLICITADA'`. |
 | `channel` | `VARCHAR(20)` (`CHECK`) | Sim | `'WHATSAPP_BUTTON'` (clique direto no chat) ou `'WEB_PORTAL'` (página pública). |
 | `approver_name` | `VARCHAR(120)` | Sim | Nome de quem aprovou. |

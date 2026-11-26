@@ -9,7 +9,7 @@
   import { db, users, roles, eq } from '@soares/database';
   ```
 - **Issue(s) relacionada(s):** Issue #1 (Fundação do Monorepo e Docker), Issue #2 (Schema Drizzle Bloco 1.1), Issue #3 (Núcleo NestJS, Auth JWT e RBAC), Issue #4 (Módulo CRM Interno & Clientes), Issue #5 (Módulo Engenharia Gráfica), Issue #6 (Seed Idempotente) e Issue #28 (Soft Deactivation em Clientes)
-- **Responsabilidade:** Orquestrar os 6 workspaces TypeScript do monorepo (`pnpm` + `Turborepo`) sobre PostgreSQL 16 e Redis 7 locais via Docker, padronizando o ciclo de vida de inicialização de variáveis de ambiente e o pipeline global de segurança de cada requisição HTTP na API NestJS.
+- **Responsabilidade:** Orquestrar os 6 workspaces TypeScript do monorepo (`pnpm` + `Turborepo`) sobre PostgreSQL 16 (Supabase ou Docker local) e Redis 7, padronizando o ciclo de vida de inicialização de variáveis de ambiente, a desativação lógica (`RN-Soft-Deactivation`) e o pipeline global de segurança de cada requisição HTTP na API NestJS.
 
 ---
 
@@ -21,7 +21,7 @@
 erp-grafica-soares/
 ├── apps/
 │   ├── api      (@soares/api)            ──► NestJS 10 REST API (CommonJS + tsc-watch + tsx)
-│   ├── web      (@soares/web)            ──► Next.js (placeholder — Issue #7)
+│   ├── web      (@soares/web)            ──► Next.js (Issue #7 — 3 Shells, 17 telas, PIN Modal e 3 PDFs)
 │   └── worker   (@soares/worker)         ──► BullMQ Worker (placeholder — Issue #10)
 └── packages/
     ├── shared         (@soares/shared)         ──► Catálogo RBAC + Schemas Zod (sem deps internas)
@@ -73,7 +73,7 @@ tsx dist/main.js                    (2. Executa JS compilado + transpila @soares
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ 2. RolesGuard (APP_GUARD #2)                                            │
 │    • Consulta @RequirePermissions(...) via Reflector                    │
-│    • Sem permissões exigidas ou user.permissions['system.all'] -> OK    │
+│    • hasPermission(): system.all | chave exata | herança *.manage->.view│
 │    • Exige todas as chaves em request.user.permissions (senão 403)      │
 └──────────────────────────────────┬──────────────────────────────────────┘
                                    │
@@ -149,9 +149,18 @@ tsx dist/main.js                    (2. Executa JS compilado + transpila @soares
   2. `.env.development` na raiz do repositório.
   3. `.env` na raiz do repositório (fallback).
 
+### 4.4 Padrões Transversais de Ciclo de Vida & Frontend do MVP
+
+- **Desativação Lógica (`RN-Soft-Deactivation`) e Rotas Dedicadas:**
+  - Cadastros estruturantes (`customers`, `price_tables`, `machines`, `materials`, `finishing_services`, `product_templates`) usam `active` + `deactivated_at`, listagens `GET` filtram `active = true` por padrão (`?includeInactive=true` opcional), `PATCH .../:id` bloqueia alteração direta de `active`/`currentOdometer`/`stockQty` e transições de status usam `PATCH .../:id/status`.
+  - `DELETE` físico é proibido para `quotes`, `users` (`PATCH /users/:id/status`) e histórico de arquivos; para `crm.delete` e `engineering.delete` (`ADMIN`), só ocorre quando não há vínculo FK (`23503` → `409 Conflict`).
+- **Arquitetura de Interface do MVP (`@soares/web` — detalhe completo em [docs/architecture/telas-e-shells-mvp.md](../architecture/telas-e-shells-mvp.md)):**
+  - **3 Shells (17 telas):** Público/Auth (`/login`, `/upload/[token]`, `/proposta/[token]`, `/aprovacao/[token]`), ERP Administrativo & Comercial (11 telas) e Chão de Fábrica Blindado (2 telas sem nenhum dado financeiro).
+  - **Transversal & Impressão:** Modal de PIN Gerencial + 3 layouts (`Proposta Comercial PDF`, `OS Técnica Blindada A4/A5 com QR Code`, `Etiqueta Térmica de Volume`).
+
 ---
 
-## 5. Referência Detalhada (Classes, Métodos, Decorators e Guards)
+## 5. Métodos, Endpoints e Exemplos de Implementação
 
 ### 5.1 Configuração Base TypeScript (`tsconfig.base.json` vs. `apps/api/tsconfig.json`)
 
@@ -225,7 +234,7 @@ tsx dist/main.js                    (2. Executa JS compilado + transpila @soares
 
 1. **`tsx watch src/main.ts` quebra Injeção de Dependência no NestJS:** O `tsx` usa `esbuild`, que **não emite `emitDecoratorMetadata`** (`design:paramtypes`), fazendo `Reflector` ou services chegarem como `undefined` nos construtores. Por isso, o script `dev` da API usa `tsc-watch -p tsconfig.json --onSuccess "tsx dist/main.js"` — o `tsc` emite os metadados completos e o `tsx` executa o JS compilado resolvendo os `.ts` de `@soares/*`.
 2. **Hoisting de imports estáticos antes de `process.loadEnvFile`:** Em Node/TypeScript, todos os `import` estáticos são avaliados antes de código imperativo no topo do `main.ts`. Mantenha `import './env'` **sempre na linha 1** de `apps/api/src/main.ts` e use `registerAsync` em módulos que leem `process.env`.
-3. **`AggregateError` (HTTP `500`) nas rotas que consultam o banco:** Indica que o container `soares-postgres` (`localhost:5432`) está parado (Docker Desktop fechado). Abra o Docker Desktop e rode `pnpm.cmd docker:up`.
+3. **`AggregateError` (HTTP `500`) nas rotas que consultam o banco:** Indica que o PostgreSQL configurado em `packages/database/src/client.ts` está inacessível (ex.: projeto Supabase pausado/sem rede ou, se usando `LOCAL_DATABASE_URL`, Docker Desktop fechado). Confira a conectividade ou rode `pnpm.cmd docker:up` no modo offline.
 4. **PowerShell bloqueando `pnpm.ps1` no Windows:** Caso a ExecutionPolicy bloqueie `pnpm`, utilize `pnpm.cmd` ou libere `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 5. **UTF-8 BOM em arquivos `.json`:** O `pnpm` v12 rejeita `package.json` com BOM (`EF BB BF`) ao executar scripts via Turborepo. Salve sempre todos os `.json` como UTF-8 **sem BOM**.
 

@@ -6,7 +6,7 @@ export default defineConfig ({
     schema: './src/schema/index.ts',
     out: '.drizzle',
     dbCredentials: {
-        url: getRequiredEnv('LOCAL_DATABASE_URL'),
+        url: process.env.DIRECT_URL?.trim() || getRequiredEnv('SUPABASE_DIRECT_CONNECTION'),
     },
     verbose: true,
     strict: true,

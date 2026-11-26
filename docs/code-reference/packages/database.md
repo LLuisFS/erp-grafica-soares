@@ -87,10 +87,12 @@ Domínio 4 (engineering.ts)
 
 ### 4.1 Variáveis de Conexão e Configuração do Pool
 
-- **`client.ts` e `drizzle.config.ts`:** Atualmente utilizam `getRequiredEnv('LOCAL_DATABASE_URL')` para desenvolvimento local com Docker (`soares-postgres` em `localhost:5432`). Em ambiente remoto (Supabase), a arquitetura prevê `SUPABASE_TRANSACTION_POOLER` / `DATABASE_URL` no `client.ts` (porta `6543`) e `SUPABASE_DIRECT_CONNECTION` / `DIRECT_URL` (ou Session Pooler porta `5432`) no `drizzle.config.ts`.
+- **`client.ts` (runtime da API e `seed.ts`):** utiliza `process.env.DATABASE_URL?.trim() || getRequiredEnv('SUPABASE_TRANSACTION_POOLER')` (Transaction Pooler na porta `6543`, compatível com IPv4). Quando a URL aponta para `supabase.com`, ativa automaticamente `ssl: 'require'`.
+- **`drizzle.config.ts` (CLI `drizzle-kit generate` / `migrate`):** utiliza `process.env.DIRECT_URL?.trim() || getRequiredEnv('SUPABASE_DIRECT_CONNECTION')` (Session Pooler na porta `5432`, evitando falhas de `ENOTFOUND` em redes IPv4 contra o host IPv6-only `db.<ref>.supabase.co`).
+- **Alternativa local via Docker:** basta apontar `DATABASE_URL` e `DIRECT_URL` para `LOCAL_DATABASE_URL` (`postgresql://soares:soares_dev_password@localhost:5432/erp_grafica_soares`).
 - **Opções do driver `postgres-js`:**
   - `prepare: false` — obrigatório para compatibilidade com PgBouncer / Supabase Transaction Pooler em modo transação.
-  - `max: 10` — limita o pool local a 10 conexões simultâneas.
+  - `max: 10` — limita o pool de conexões simultâneas por instância.
 
 ### 4.2 Constraints `CHECK`, Índices e Padrões de Coluna
 
@@ -146,7 +148,8 @@ Domínio 4 (engineering.ts)
 - **O que faz:** Garante que `.env.development` / `.env` da raiz (descoberta via `findRepoRoot` procurando `pnpm-workspace.yaml`) foram carregados e retorna `process.env[name]?.trim()`.
 - **Como implementar (exemplo real em `src/client.ts`):**
   ```ts
-  const databaseUrl = getRequiredEnv('LOCAL_DATABASE_URL');
+  const databaseUrl =
+    process.env.DATABASE_URL?.trim() || getRequiredEnv('SUPABASE_TRANSACTION_POOLER');
   ```
 - **Exceções:** Lança `Error('Variável de ambiente obrigatória não definida: <name>')` imediatamente na subida da aplicação (Fail-Fast).
 
@@ -157,6 +160,7 @@ Domínio 4 (engineering.ts)
   export const queryClient = postgres(databaseUrl, {
     prepare: false,
     max: 10,
+    ...(databaseUrl.includes('supabase.com') ? { ssl: 'require' } : {}),
   });
 
   export const db = drizzle(queryClient, { schema });

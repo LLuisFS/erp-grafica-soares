@@ -27,7 +27,7 @@
 | **Atores** | Atendente (Primário), Cliente, WhatsApp API (Secundários) |
 | **Pré-condições** | Provedor de mensageria (`IWhatsappProvider` — Meta Cloud API ou Evolution API) configurado e ativo; atendente autenticado no ERP. |
 | **Pós-condições** | Mensagens registradas de forma idempotente em `wa_messages`, conversa atualizada em `wa_conversations` e sincronizada em tempo real via `Socket.IO`. |
-| **Fluxo Principal** | 1. O Cliente envia mensagem de texto, áudio ou anexo para o número comercial da Gráfica Soares.<br>2. O webhook enfileira o evento no `BullMQ`/`Redis` garantindo idempotência pelo `wamid`.<br>3. O sistema executa `«include» UC02` para localizar ou vincular o cliente pelo telefone E.164.<br>4. O sistema atualiza `window_expires_at` (+24h) e notifica o painel via `Socket.IO`.<br>5. O Atendente assume o ticket (`assigned_user_id`, status `EM_ATENDIMENTO`) e responde ao Cliente. |
+| **Fluxo Principal** | 1. O Cliente envia mensagem de texto, áudio ou anexo para o número comercial da Gráfica Soares.<br>2. O webhook enfileira o evento no `BullMQ`/`Redis` garantindo idempotência pelo `wamid`.<br>3. O sistema executa `«include» UC02` para localizar ou vincular o cliente pelo telefone E.164.<br>4. O sistema atualiza `last_customer_message_at` e `window_expires_at` (`last_customer_message_at + 24h`) e notifica o painel via `Socket.IO`.<br>5. O Atendente assume o ticket (`assigned_user_id`, status `EM_ATENDIMENTO`) e responde ao Cliente. |
 | **Fluxos Alternativos / Exceções** | **FA01 — Janela de 24h expirada (`RN09`):** Se `window_expires_at < now()`, o sistema bloqueia texto livre e exige o disparo via `wa_notification_templates` pré-aprovado na Meta.<br>**EX01 — Falha de entrega:** O webhook atualiza `delivery_status = 'FAILED'` e exibe `error_reason` na interface. |
 | **Requisitos / Regras** | `RF01`, `RF02`, `RN09`, `RNF01`, `RNF04` |
 | **Tabelas Envolvidas** | `wa_conversations`, `wa_messages`, `wa_notification_templates` |
@@ -40,10 +40,10 @@
 | **Módulo / Fase** | Módulo A / Módulo C — CRM Interno `[MVP]` |
 | **Atores** | Atendente (Primário), Cliente (Secundário) |
 | **Pré-condições** | Conversa ativa recebida em `wa_conversations` com número normalizado no formato E.164. |
-| **Pós-condições** | Registro do cliente criado ou localizado em `customers` e vinculado a `wa_conversations.customer_id` sem criação de login/senha (`RN02`). |
-| **Fluxo Principal** | 1. O sistema busca o número E.164 em `customers.whatsapp_phone` e `customer_phones.phone_e164`.<br>2. Caso encontre, vincula automaticamente `customer_id` à conversa.<br>3. Caso não encontre, o sistema verifica se o Cliente enviou CPF (11 dígitos) ou CNPJ (14 dígitos) na mensagem.<br>4. Se localizado pelo documento, adiciona o novo telefone em `customer_phones`.<br>5. Caso seja cliente novo, o Atendente preenche o cadastro fiscal rápido (`person_type`, `name`, `document_cpf_cnpj`, `price_table_id`, `billing_type`) na barra lateral do chat. |
-| **Fluxos Alternativos / Exceções** | **EX01 — Documento duplicado:** Se o CPF/CNPJ já existir em `customers`, o sistema impede duplicidade e sugere vincular o novo telefone ao cadastro existente. |
-| **Requisitos / Regras** | `RF02`, `RN02` |
+| **Pós-condições** | Registro do cliente criado, localizado ou reativado em `customers` e vinculado a `wa_conversations.customer_id` sem criação de login/senha (`RN02`). |
+| **Fluxo Principal** | 1. O sistema executa `GET /customers/lookup` buscando o número E.164 em `customers.whatsapp_phone` e `customer_phones.phone_e164` (e por CPF/CNPJ quando informado).<br>2. Caso encontre (mesmo inativo, sinalizando `isInactive: !active`), vincula automaticamente `customer_id` à conversa.<br>3. Caso localizado pelo documento com um número novo (`isNewPhoneCustomer = true`), o atendente pode vincular o telefone em `customer_phones` (`POST /customers/:id/phones`).<br>4. Caso seja cliente novo, o Atendente preenche o cadastro fiscal rápido (`person_type`, `name`, `document_cpf_cnpj`, `price_table_id`, `billing_type`) em `POST /customers`. |
+| **Fluxos Alternativos / Exceções** | **FA01 — Reativação automática por CPF/CNPJ (`RN02` / `RN10`):** Se o `document_cpf_cnpj` enviado em `POST /customers` pertencer a um cliente inativo (`active = false`) e o telefone não colidir com outro cadastro, o sistema reativa o registro (`active = true`, `deactivated_at = null`), atualiza os campos e retorna `reactivated: true`.<br>**EX01 — Documento ou telefone em uso por cliente ativo:** O sistema retorna `409 Conflict` com `existingCustomerId`, `isInactive` e `existingCustomer` para evitar duplicidade. |
+| **Requisitos / Regras** | `RF02`, `RF15.1`, `RN02`, `RN10` |
 | **Tabelas Envolvidas** | `customers`, `customer_phones`, `customer_addresses`, `price_tables` |
 
 #### `UC03` — Promover Anexo do Chat para Arte do Orçamento
@@ -99,11 +99,11 @@
 | **Identificador / Nome** | `UC06` — Elaborar Orçamento Multi-Tiragem |
 | **Módulo / Fase** | Módulo B & C — Orçamentação & CRM `[MVP]` |
 | **Atores** | Atendente (Primário), Gerente (Secundário) |
-| **Pré-condições** | Cliente identificado em `customers` (com `price_table_id` associado); máquinas, materiais e acabamentos ativos no catálogo. |
+| **Pré-condições** | Cliente identificado em `customers` (com `price_table_id` associado); máquinas, materiais, acabamentos e gabaritos ativos (`active = true`) nos seletores de cadastro. |
 | **Pós-condições** | Orçamento salvo em `quotes` (`status = 'RASCUNHO'`), com itens em `quote_items`, até 4 simulações por item em `quote_item_tiers` e acabamentos em `quote_item_finishings`. |
-| **Fluxo Principal** | 1. O Atendente inicia um orçamento vinculado ao cliente e à conversa (`conversation_id`).<br>2. Adiciona um ou mais itens selecionando um `product_template` ou informando dimensões (`width_mm`, `height_mm`, `bleed_mm`) e cores (`colors_front`, `colors_back`).<br>3. Seleciona os acabamentos em `finishing_services` e informa até 4 faixas de quantidade (ex.: 100, 500, 1.000, 2.500).<br>4. Para cada faixa, o sistema executa `«include» UC07` e armazena o snapshot completo de custos e preços em `quote_item_tiers`.<br>5. O Atendente define a validade (`valid_until`) e salva a proposta. |
-| **Fluxos Alternativos / Exceções** | **FA01 — Desconto acima da alçada (`RN06`):** Se o desconto aplicado exceder `users.max_discount_pct`, o sistema aciona `«extend» UC08` antes de permitir salvar/enviar. |
-| **Requisitos / Regras** | `RF11`, `RF12`, `RF13`, `RF15`, `RF18`, `RN05`, `RN06` |
+| **Fluxo Principal** | 1. O Atendente inicia um orçamento vinculado ao cliente e à conversa (`conversation_id`).<br>2. Adiciona um ou mais itens selecionando apenas registros ativos (`active = true`) em `product_templates`, `machines`, `materials` e `finishing_services` (ou informando medidas personalizadas).<br>3. Informa até 4 faixas de quantidade (ex.: 100, 500, 1.000, 2.500).<br>4. Para cada faixa, o sistema executa `«include» UC07` e armazena o snapshot completo de custos e preços em `quote_item_tiers` (preservando os rótulos/valores históricos caso algum insumo ou máquina seja inativado depois).<br>5. O Atendente define a validade (`valid_until`) e salva a proposta. |
+| **Fluxos Alternativos / Exceções** | **FA01 — Desconto acima da alçada (`RN06`):** Se o desconto aplicado exceder `users.max_discount_pct`, o sistema aciona `«extend» UC08` antes de permitir salvar/enviar.<br>**FA02 — Cancelamento / Arquivamento (`RN10`):** Orçamentos não possuem `DELETE` físico; desistências mudam o status para `'PERDIDO'` (com `loss_reason`) ou `'CANCELADO'`. |
+| **Requisitos / Regras** | `RF11`, `RF12`, `RF13`, `RF15`, `RF18`, `RN05`, `RN06`, `RN10` |
 | **Tabelas Envolvidas** | `quotes`, `quote_items`, `quote_item_tiers`, `quote_item_finishings`, `price_tables` |
 
 #### `UC07` — Calcular Imposição e Custos (`@soares/pricing-engine`)
@@ -139,13 +139,13 @@
 | Campo | Especificação |
 | --- | --- |
 | **Identificador / Nome** | `UC09` — Duplicar Pedido para Reimpressão |
-| **Módulo / Fase** | Módulo B — Orçamentação `[Fase 2]` |
+| **Módulo / Fase** | Módulo B — Orçamentação `[MVP / Fase 2]` |
 | **Atores** | Atendente (Primário) |
-| **Pré-condições** | Orçamento ou Ordem de Serviço anterior existente no histórico do cliente. |
-| **Pós-condições** | Novo orçamento criado em `RASCUNHO` com especificações técnicas e arquivos clonados, porém com custos e preços recalculados. |
-| **Fluxo Principal** | 1. O Atendente localiza um pedido anterior do cliente e aciona "Duplicar Pedido".<br>2. O sistema clona `quote_items`, `quote_item_finishings` e referencia os `artwork_files` aprovados anteriormente.<br>3. O sistema executa `«include» UC07` aplicando os custos atuais de `materials` e `machines`.<br>4. O novo orçamento é aberto em `RASCUNHO` com nova data `valid_until`. |
-| **Fluxos Alternativos / Exceções** | **EX01 — Insumo ou máquina inativos (`active = false`):** O sistema alerta o atendente para selecionar um substrato/equipamento substituto antes de recalcular. |
-| **Requisitos / Regras** | `RF14` |
+| **Pré-condições** | Orçamento ou Ordem de Serviço anterior existente no histórico do cliente (mesmo que `quotes.status` seja `'EXPIRADO'`, `'PAGO_CONVERTIDO'` ou `'CANCELADO'`). |
+| **Pós-condições** | Novo orçamento criado em `RASCUNHO` com especificações técnicas e arquivos clonados, porém com custos e preços recalculados com os parâmetros vigentes. |
+| **Fluxo Principal** | 1. O Atendente localiza um pedido anterior do cliente e aciona "Duplicar Pedido".<br>2. O sistema clona `quote_items`, `quote_item_finishings` e referencia os `artwork_files` aprovados anteriormente (sem apagar o orçamento original).<br>3. O sistema executa `«include» UC07` aplicando os custos atuais de `materials`, `machines`, `finishing_services` e `price_tables`.<br>4. O novo orçamento é aberto em `RASCUNHO` com nova data `valid_until`. |
+| **Fluxos Alternativos / Exceções** | **EX01 — Insumo, máquina, acabamento ou tabela inativos (`active = false`):** O sistema preserva o rótulo do item original para referência e alerta o atendente para selecionar um substituto ativo antes de recalcular. |
+| **Requisitos / Regras** | `RF14`, `RN10` |
 | **Tabelas Envolvidas** | `quotes`, `quote_items`, `quote_item_tiers`, `artwork_files` |
 
 #### `UC10` — Enviar Proposta Comercial Interativa no WhatsApp
@@ -157,7 +157,7 @@
 | **Atores** | Atendente (Primário), Cliente, WhatsApp API (Secundários) |
 | **Pré-condições** | Orçamento em `RASCUNHO` ou `NEGOCIACAO` com pelo menos 1 item e 1 tiragem calculada; desconto dentro da alçada ou autorizado via PIN. |
 | **Pós-condições** | PDF da proposta gerado, mensagem interativa enviada no WhatsApp (`QUOTE_SENT`) e `quotes.status` atualizado para `'ENVIADO'`. |
-| **Fluxo Principal** | 1. O Atendente clica em "Enviar Proposta no WhatsApp".<br>2. O worker gera o PDF comercial com a identidade da Gráfica Soares e o comparativo das tiragens simuladas.<br>3. O sistema envia no WhatsApp do cliente o resumo, o anexo PDF e os botões interativos `[Aprovar Orçamento]` correspondentes às tiragens.<br>4. O status do orçamento muda para `'ENVIADO'`. |
+| **Fluxo Principal** | 1. O Atendente clica em "Enviar Proposta no WhatsApp".<br>2. O worker gera o PDF comercial com a identidade da Gráfica Soares e o comparativo das tiragens simuladas.<br>3. O sistema envia no WhatsApp do cliente o resumo, o anexo PDF, os botões interativos `[Aprovar Orçamento]` e o link público `/proposta/[token]`.<br>4. O status do orçamento muda para `'ENVIADO'`. |
 | **Fluxos Alternativos / Exceções** | **FA01 — Janela de 24h expirada (`RN09`):** O disparo utiliza o template oficial mapeado em `wa_notification_templates` para o evento `QUOTE_SENT`. |
 | **Requisitos / Regras** | `RF05`, `RF07`, `RF15`, `RN09` |
 | **Tabelas Envolvidas** | `quotes`, `wa_messages`, `wa_notification_templates` |
@@ -171,7 +171,7 @@
 | **Atores** | Cliente (Primário) |
 | **Pré-condições** | Orçamento com status `'ENVIADO'` ou `'NEGOCIACAO'` e data atual menor ou igual a `quotes.valid_until` (`RN05`). |
 | **Pós-condições** | Tiragem marcada com `is_chosen = true`, `quotes.status = 'AGUARDANDO_PAGAMENTO'`, `quotes.approved_at` gravado e cobrança iniciada (`«include» UC12`) **sem criar OS ainda** (`RN01`). |
-| **Fluxo Principal** | 1. O Cliente clica no botão `[Aprovar Orçamento]` no WhatsApp selecionando a tiragem desejada (`tierUuid`).<br>2. O webhook identifica o `interactive_payload` e verifica se `hoje <= valid_until`.<br>3. O sistema marca `quote_item_tiers.is_chosen = true`, atualiza `quotes.total_amount`, grava `approved_at` e altera o status para `'AGUARDANDO_PAGAMENTO'`.<br>4. O sistema executa imediatamente `«include» UC12` para gerar o título financeiro e a cobrança. |
+| **Fluxo Principal** | 1. O Cliente clica no botão `[Aprovar Orçamento]` no WhatsApp (ou acessa o link público `/proposta/[token]` sem login) selecionando a tiragem desejada (`tierUuid`).<br>2. A API/webhook verifica se `hoje <= valid_until`.<br>3. O sistema marca `quote_item_tiers.is_chosen = true`, atualiza `quotes.total_amount`, grava `approved_at` e altera o status para `'AGUARDANDO_PAGAMENTO'`.<br>4. O sistema executa imediatamente `«include» UC12` para gerar o título financeiro e a cobrança. |
 | **Fluxos Alternativos / Exceções** | **EX01 — Proposta expirada (`RN05`):** Se `hoje > valid_until`, o sistema muda o status para `'EXPIRADO'`, bloqueia a aprovação e notifica o atendente para recalcular com custos vigentes.<br>**FA01 — Cliente declina proposta:** O atendente registra status `'PERDIDO'` informando obrigatoriamente `loss_reason` (`RF15`). |
 | **Requisitos / Regras** | `RF05`, `RF15`, `RF16`, `RN01`, `RN05` |
 | **Tabelas Envolvidas** | `quotes`, `quote_item_tiers`, `wa_messages` |
@@ -249,7 +249,7 @@
 | **Atores** | Arte-Finalista (Primário), Cliente, WhatsApp API (Secundários) |
 | **Pré-condições** | Ordem de Serviço emitida (`service_orders`) e layout preparado pelo arte-finalista. |
 | **Pós-condições** | Prova salva em `artwork_files` (`file_stage = 'PROVA_DIGITAL'`), protocolo criado em `artwork_approvals` (`status = 'PENDENTE'`), OS movida para `AGUARDANDO_APROVACAO` e prova enviada no WhatsApp. |
-| **Fluxo Principal** | 1. O Arte-Finalista realiza o upload da prova digital no R2 (`artwork_files` com `file_stage = 'PROVA_DIGITAL'` e `version_number` incremental).<br>2. O sistema cria um registro em `artwork_approvals` gerando um `approval_token` UUID único.<br>3. A OS muda para `'AGUARDANDO_APROVACAO'`.<br>4. O ERP dispara automaticamente a prova no WhatsApp (`ART_PROOF_READY`) com o Termo de Responsabilidade, botões `[Aprovar Arte]` / `[Solicitar Alteração]` e o link público `/aprovar/[token]`. |
+| **Fluxo Principal** | 1. O Arte-Finalista realiza o upload da prova digital no R2 (`artwork_files` com `file_stage = 'PROVA_DIGITAL'` e `version_number` incremental).<br>2. O sistema cria um registro em `artwork_approvals` gerando um `approval_token` UUID único.<br>3. A OS muda para `'AGUARDANDO_APROVACAO'`.<br>4. O ERP dispara automaticamente a prova no WhatsApp (`ART_PROOF_READY`) com o Termo de Responsabilidade, botões `[Aprovar Arte]` / `[Solicitar Alteração]` e o link público `/aprovacao/[token]`. |
 | **Fluxos Alternativos / Exceções** | **FA01 — Arte fechada validada sem criação de layout:** Caso o cliente já tenha enviado arquivo fechado aprovado, a OS segue diretamente para `PRE_IMPRESSAO`. |
 | **Requisitos / Regras** | `RF06`, `RF07`, `RF19`, `RF21` |
 | **Tabelas Envolvidas** | `artwork_files`, `artwork_approvals`, `service_orders` |
@@ -263,7 +263,7 @@
 | **Atores** | Cliente (Primário) |
 | **Pré-condições** | Registro ativo em `artwork_approvals` com status `'PENDENTE'`. |
 | **Pós-condições** | Decisão gravada de forma imutável em `artwork_approvals`; se aprovada, `service_orders.art_approved = true` e OS movida para `'PRE_IMPRESSAO'`. |
-| **Fluxo Principal** | 1. O Cliente visualiza a prova digital pelo WhatsApp ou pela página pública `/aprovar/[token]`.<br>2. O Cliente confirma o Termo de Responsabilidade (`terms_accepted = true`) e clica em `[Aprovar Arte]`.<br>3. O sistema grava de forma imutável em `artwork_approvals`: `status = 'APROVADO'`, `channel` (`WHATSAPP_BUTTON` ou `WEB_PORTAL`), `approver_phone`/`approver_ip`, `responded_at` e vincula o `sha256_hash` da prova.<br>4. O sistema marca `service_orders.art_approved = true`, move a OS para `'PRE_IMPRESSAO'` e envia confirmação (`ART_APPROVED`) no WhatsApp. |
+| **Fluxo Principal** | 1. O Cliente visualiza a prova digital pelo WhatsApp ou pela página pública `/aprovacao/[token]`.<br>2. O Cliente confirma o Termo de Responsabilidade (`terms_accepted = true`) e clica em `[Aprovar Arte]`.<br>3. O sistema grava de forma imutável em `artwork_approvals`: `status = 'APROVADO'`, `channel` (`WHATSAPP_BUTTON` ou `WEB_PORTAL`), `approver_phone`/`approver_ip`, `responded_at` e vincula o `sha256_hash` da prova.<br>4. O sistema marca `service_orders.art_approved = true`, move a OS para `'PRE_IMPRESSAO'` e envia confirmação (`ART_APPROVED`) no WhatsApp. |
 | **Fluxos Alternativos / Exceções** | **FA01 — Solicitação de alteração:** O Cliente seleciona `[Solicitar Alteração]` e descreve os ajustes (`client_feedback`). O status em `artwork_approvals` muda para `'ALTERACAO_SOLICITADA'` e a OS retorna para `'FILA_ARTE'` para nova versão (`v2`, `v3`). |
 | **Requisitos / Regras** | `RF06`, `RF21`, `RF22`, `RN03` |
 | **Tabelas Envolvidas** | `artwork_approvals`, `artwork_files`, `service_orders` |
@@ -383,7 +383,7 @@
 | **Atores** | Administrador (`ADMIN`) (Primário) |
 | **Pré-condições** | Usuário autenticado com cargo `ADMIN` e permissões administrativas em `roles.permissions`. |
 | **Pós-condições** | Parâmetros operacionais, comerciais e integrações atualizados no banco de dados. |
-| **Fluxo Principal** | 1. O Administrador gerencia usuários internos (`users`), definindo `role_id`, `max_discount_pct`, `commission_pct` e `approval_pin_hash`.<br>2. Cadastra e atualiza custos de equipamentos (`machines`), substratos (`materials`), acabamentos (`finishing_services`), gabaritos (`product_templates`) e multiplicadores de tabelas (`price_tables`).<br>3. Configura os provedores de pagamento ativos (`payment_providers`, definindo `is_default`) e os templates automáticos do WhatsApp (`wa_notification_templates`). |
-| **Fluxos Alternativos / Exceções** | **FA01 — Inativação lógica:** Ao desativar um usuário, máquina ou tabela (`active = false`), o sistema preserva o histórico de orçamentos e OSs antigas sem quebrar chaves estrangeiras. |
-| **Requisitos / Regras** | `RF13`, `RF28`, `RF33`, `RNF05` |
+| **Fluxo Principal** | 1. O Administrador gerencia usuários internos (`users`), definindo `role_id`, `max_discount_pct`, `commission_pct` e `approval_pin_hash` (inativação exclusiva via `PATCH /users/:id/status`, sem `DELETE` físico).<br>2. Cadastra e atualiza equipamentos (`machines` + hodômetro via `PATCH /engineering/machines/:id/meter`), substratos (`materials` com cálculo automático `unit_cost = purchase_price / conversion_factor` e ajuste de saldo via `POST /engineering/materials/:id/stock-adjustment`), acabamentos (`finishing_services`), gabaritos (`product_templates`) e tabelas (`price_tables`).<br>3. Configura os provedores de pagamento ativos (`payment_providers`, definindo `is_default`) e os templates automáticos do WhatsApp (`wa_notification_templates`). |
+| **Fluxos Alternativos / Exceções** | **FA01 — Inativação lógica (`RN10`):** Ao desativar usuário, cliente ou item de engenharia (`PATCH .../:id/status` com `{ "active": false }`), `deactivated_at` é gravado e os registros históricos preservam os rótulos sem quebrar FKs.<br>**EX01 — Exclusão física bloqueada (`23503`):** Apenas `ADMIN` (`crm.delete`, `engineering.delete`) pode executar `DELETE` quando não houver vínculos; caso contrário a API retorna `409 Conflict`. |
+| **Requisitos / Regras** | `RF13`, `RF28`, `RF32`, `RF33`, `RN10`, `RNF05` |
 | **Tabelas Envolvidas** | `roles`, `users`, `machines`, `materials`, `finishing_services`, `product_templates`, `price_tables`, `payment_providers`, `wa_notification_templates` |
