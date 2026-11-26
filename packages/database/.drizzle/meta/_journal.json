@@ -22,6 +22,13 @@
       "when": 1795306369768,
       "tag": "0002_add_customer_phones_index",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795704173452,
+      "tag": "0003_add_customers_soft_deactivation",
+      "breakpoints": true
     }
   ]
 }

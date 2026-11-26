@@ -1,15 +1,15 @@
 import { sql } from 'drizzle-orm';
 import {
-  boolean,
-  char,
-  check,
-  index,
-  numeric,
-  pgTable,
-  text,
-  timestamp,
-  uuid,
-  varchar,
+    boolean,
+    char,
+    check,
+    index,
+    numeric,
+    pgTable,
+    text,
+    timestamp,
+    uuid,
+    varchar,
 } from 'drizzle-orm/pg-core';
 import { users } from './core';
 
@@ -49,14 +49,18 @@ export const customers = pgTable(
             .notNull()
             .default('0.00'),
         notes: text('notes'),
+        // Desativação lógica via PATCH /customers/:id/status (preserva histórico fiscal e comercial)
+        active: boolean('active').notNull().default(true),
+        deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
         createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
         updatedAt: timestamp('updated_at', { withTimezone: true }),
-     },
-     (table) => [
+    },
+    (table) => [
         check('customers_person_type_check', sql`${table.personType} IN ('PF', 'PJ')`),
         check('customers_billing_type_check', sql`${table.billingType} in ('AVISTA', 'FATURADO_MENSAL')`),
         index('idx_customers_whatsapp_phone').on(table.whatsappPhone),
-     ],
+        index('idx_customers_active').on(table.active),
+    ],
 );
 
 // 2.3 customer_phones

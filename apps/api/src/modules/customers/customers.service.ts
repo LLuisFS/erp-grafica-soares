@@ -26,6 +26,7 @@ import {
     ListCustomersQuery,
     LookupCustomerQuery,
     onlyDigits,
+    ToggleActiveStatusInput,
     UpdateCustomerAddressInput,
     UpdateCustomerInput
 } from '@soares/shared';
@@ -44,7 +45,7 @@ export class CustomersService {
 
     /**
      * Busca hierárquica para o atendimento WhatsApp (RF02): telefone principal -> telefone secundário -> CPF/CNPJ.
-     * Sinaliza `isNewPhoneCustomer` quando o cliente foi encontrado pelo documento mas entrou por um número novo.
+     * Sinaliza `isNewPhoneCustomer` (número novo para documento já cadastrado) e `isInactive` (cliente desativado logicamente).
      */
     async lookup(query: LookupCustomerQuery) {
         let customerId: string | null = null;
@@ -103,13 +104,18 @@ export class CustomersService {
         return {
             matchedBy,
             isNewPhoneCustomer,
+            isInactive: !customer.active,
             customer,
         };
     }
 
-    /** Lista clientes com paginação, filtros (`personType`, `billingType`) e busca textual/numérica em paralelo com `COUNT(*)`. */
+    /** Lista clientes com paginação, filtros (`includeInactive`, `personType`, `billingType`) e busca textual/numérica em paralelo com `COUNT(*)`. */
     async list(query: ListCustomersQuery) {
         const conditions = [];
+
+        if (!query.includeInactive) {
+            conditions.push(eq(customers.active, true));
+        }
 
         if (query.personType) {
             conditions.push(eq(customers.personType, query.personType));
@@ -199,18 +205,74 @@ export class CustomersService {
 
     /**
      * Cadastra cliente PF/PJ com telefones e endereços iniciais em transação atômica.
-     * Aplica fallback da tabela de preço ativa e vincula `currentUserId` caso `assignedUserId` não seja informado.
+     * Caso o CPF/CNPJ informado pertença a um cliente inativo (`active = false`), reativa o cadastro automaticamente
+     * impedindo sequestro de telefone de terceiros.
      */
     async create(input: CreateCustomerInput, currentUserId: string) {
         if (input.documentCpfCnpj) {
-            await this.ensureDocumentAvailable(input.whatsappPhone);
+            const existingByDoc = await this.db.query.customers.findFirst({
+                where: eq(customers.documentCpfCnpj, input.documentCpfCnpj),
+            });
+
+            if (existingByDoc) {
+                if (existingByDoc.active) {
+                    throw new ConflictException({
+                        message: 'Já existe um cliente ativo cadastrado com este CPF/CNPJ.',
+                        conflictField: 'documentCpfCnpj',
+                        existingCustomerId: existingByDoc.id,
+                        existingCustomer: {
+                            id: existingByDoc.id,
+                            name: existingByDoc.name,
+                            documentCpfCnpj: existingByDoc.documentCpfCnpj,
+                            whatsappPhone: existingByDoc.whatsappPhone,
+                        },
+                    });
+                }
+
+                // Impede sequestro de telefone (principal ou secundário) pertencente a outro cadastro
+                await this.ensurePhoneAvailable(input.whatsappPhone, existingByDoc.id);
+                for (const extraPhone of input.phones ?? []) {
+                    if (extraPhone.phoneE164 === input.whatsappPhone) {
+                        throw new BadRequestException(
+                            'O telefone secundário não pode ser igual ao Whatsapp principal do mesmo cadastro.',
+                        );
+                    }
+                    await this.ensurePhoneAvailable(extraPhone.phoneE164, existingByDoc.id);
+                }
+
+                await this.db
+                    .update(customers)
+                    .set({
+                        priceTableId: input.priceTableId ?? existingByDoc.priceTableId,
+                        assignedUserId: input.assignedUserId ?? existingByDoc.assignedUserId,
+                        personType: input.personType,
+                        name: input.name,
+                        tradeName: input.tradeName ?? existingByDoc.tradeName,
+                        stateRegistration: input.stateRegistration ?? existingByDoc.stateRegistration,
+                        email: input.email ?? existingByDoc.email,
+                        whatsappPhone: input.whatsappPhone,
+                        billingType: input.billingType ?? existingByDoc.billingType,
+                        creditLimit: input.creditLimit ?? existingByDoc.creditLimit,
+                        notes: input.notes ?? existingByDoc.notes,
+                        active: true,
+                        deactivatedAt: null,
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(customers.id, existingByDoc.id));
+
+                const reactivated = await this.findById(existingByDoc.id);
+                return {
+                    ...reactivated,
+                    reactivated: true,
+                };
+            }
         }
 
         await this.ensurePhoneAvailable(input.whatsappPhone);
         for (const extraPhone of input.phones ?? []) {
             if (extraPhone.phoneE164 === input.whatsappPhone) {
                 throw new BadRequestException(
-                    'O telefone secuntário não pode ser igual ao Whatsapp principal do mesmo cadastro.'
+                    'O telefone secundário não pode ser igual ao Whatsapp principal do mesmo cadastro.'
                 );
             }
             await this.ensurePhoneAvailable(extraPhone.phoneE164);
@@ -318,11 +380,45 @@ export class CustomersService {
         return this.findById(id);
     }
 
-    /** Remove o cadastro do cliente (telefones e endereços filhos são apagados em cascata pela FK `ON DELETE CASCADE`). */
+    /** Ativa ou desativa logicamente um cliente (`active` / `deactivated_at`) preservando histórico fiscal e comercial. */
+    async updateStatus(id: string, input: ToggleActiveStatusInput) {
+        await this.findById(id);
+
+        const [updated] = await this.db
+            .update(customers)
+            .set({
+                active: input.active,
+                deactivatedAt: input.active ? null : new Date(),
+                updatedAt: new Date(),
+            })
+            .where(eq(customers.id, id))
+            .returning();
+
+        return updated;
+    }
+
+    /**
+     * Exclui fisicamente um cliente sem histórico vinculado (exclusivo `crm.delete`).
+     * Bloqueia com 409 Conflict caso o PostgreSQL acuse violação de chave estrangeira (`23503`).
+     */
     async remove(id: string) {
         await this.findById(id);
-        await this.db.delete(customers).where(eq(customers.id, id));
-        return { deleted: true, id };
+
+        try {
+            await this.db.delete(customers).where(eq(customers.id, id));
+            return { deleted: true, id };
+        } catch (error: unknown) {
+            const pgCode =
+                (error as { code?: string; cause?: { code?: string } })?.code ??
+                (error as { cause?: { code?: string } })?.cause?.code;
+
+            if (pgCode === '23503') {
+                throw new ConflictException(
+                    'Não é possível excluir fisicamente um cliente com histórico vinculado. Utilize PATCH /customers/:id/status com { "active": false }.',
+                );
+            }
+            throw error;
+        }
     }
 
     /** Vincula um telefone secundário E.164 (`customer_phones`), bloqueando conflitos em qualquer cliente com 409. */
@@ -480,6 +576,7 @@ export class CustomersService {
                 name: customers.name,
                 documentCpfCnpj: customers.documentCpfCnpj,
                 whatsappPhone: customers.whatsappPhone,
+                active: customers.active,
             })
             .from(customers)
             .where(primaryCondition)
@@ -489,6 +586,8 @@ export class CustomersService {
             throw new ConflictException({
                 message: 'Este telefone já está cadastrado como WhatsApp principal de outro cliente.',
                 conflictField: 'whatsappPhone',
+                existingCustomerId: primaryConflict.id,
+                isInactive: !primaryConflict.active,
                 existingCustomer: primaryConflict,
             });
         }

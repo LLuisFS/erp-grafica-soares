@@ -27,6 +27,8 @@ import {
     listCustomersQuerySchema,
     LookupCustomerQuery,
     lookupCustomerQuerySchema,
+    ToggleActiveStatusInput,
+    toggleActiveStatusSchema,
     UpdateCustomerAddressInput,
     updateCustomerAddressSchema,
     UpdateCustomerInput,
@@ -41,7 +43,7 @@ import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { CustomersService } from './customers.service';
 
 /**
- * Controller `/customers` do CRM Interno (protegido por JWT global + RBAC `crm.view` / `crm.manage`).
+ * Controller `/customers` do CRM Interno (protegido por JWT global + RBAC `crm.view` / `crm.manage` / `crm.delete`).
  * Valida entradas via `ZodValidationPipe` com schemas de `@soares/shared` e expõe contratos OpenAPI no Swagger.
  */
 @ApiTags('CRM Interno — Clientes')
@@ -72,6 +74,7 @@ export class CustomersController {
     @ApiQuery({ name: 'billingType', required: false, enum: ['AVISTA', 'FATURADO_MENSAL'] })
     @ApiQuery({ name: 'page', required: false, example: 1 })
     @ApiQuery({ name: 'limit', required: false, example: 20 })
+    @ApiQuery({ name: 'includeInactive', required: false, type: Boolean, example: false })
     list(@Query(new ZodValidationPipe(listCustomersQuerySchema)) query: ListCustomersQuery) {
         return this.customersService.list(query);
     }
@@ -162,10 +165,32 @@ export class CustomersController {
         return this.customersService.update(id, body);
     }
 
-    /** Exclui o cliente e seus vínculos em cascata (`customer_phones` e `customer_addresses`). */
-    @Delete(':id')
+    /** Ativa ou desativa logicamente um cliente (`active` / `deactivated_at`) sem perder histórico. */
+    @Patch(':id/status')
     @RequirePermissions('crm.manage')
-    @ApiOperation({ summary: 'Remove um cadastro de cliente' })
+    @ApiOperation({ summary: 'Ativa ou desativa logicamente um cliente' })
+    @ApiBody({
+        schema: {
+            type: 'object',
+            required: ['active'],
+            properties: {
+                active: { type: 'boolean', example: false },
+            },
+        },
+    })
+    updateStatus(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body(new ZodValidationPipe(toggleActiveStatusSchema)) body: ToggleActiveStatusInput,
+    ) {
+        return this.customersService.updateStatus(id, body);
+    }
+
+    /** Exclui fisicamente um cliente sem histórico vinculado (exclusivo Admin via `crm.delete`). */
+    @Delete(':id')
+    @RequirePermissions('crm.delete')
+    @ApiOperation({
+        summary: 'Exclui fisicamente um cliente sem histórico (exclusivo Admin)',
+    })
     remove(@Param('id', ParseUUIDPipe) id: string) {
         return this.customersService.remove(id);
     }

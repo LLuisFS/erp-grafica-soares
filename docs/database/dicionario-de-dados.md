@@ -112,6 +112,8 @@ Cadastro central de clientes (Pessoa Física ou Jurídica) para atendimento via 
 | `billing_type` | `VARCHAR(20)` (`CHECK`, default `'AVISTA'`) | Não | `'AVISTA'` (exige pagamento antes de gerar OS) ou `'FATURADO_MENSAL'` (clientes PJ com contrato). |
 | `credit_limit` | `NUMERIC(12,2)` (default `0.00`) | Não | Limite de crédito aprovado para clientes `FATURADO_MENSAL`. |
 | `notes` | `TEXT` | Sim | Observações internas de atendimento ou preferências de acabamento. |
+| `active` | `BOOLEAN` (default `true`, `INDEX`) | Não | Controle de desativação lógica (`idx_customers_active`); omitido da listagem padrão quando `false` e reativado automaticamente via CPF/CNPJ no `POST /customers`. |
+| `deactivated_at` | `TIMESTAMPTZ` | Sim | Timestamp da última desativação lógica via `PATCH /customers/:id/status` (limpo para `NULL` ao reativar). |
 | `created_at` | `TIMESTAMPTZ` | Não | Data de cadastro. |
 | `updated_at` | `TIMESTAMPTZ` | Sim | Data da última atualização cadastral. |
 

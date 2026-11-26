@@ -20,7 +20,7 @@
     type RolePermissions,
   } from '@soares/database';
   ```
-- **Issue(s) relacionada(s):** Issue #2 (Modelagem Drizzle Bloco 1.1, Índices e Migrations) e Issue #6 (Seed Idempotente da Gráfica Soares)
+- **Issue(s) relacionada(s):** Issue #2 (Modelagem Drizzle Bloco 1.1, Índices e Migrations), Issue #6 (Seed Idempotente da Gráfica Soares) e Issue #28 (Desativação Lógica em `customers` e Permissão `crm.delete`)
 - **Responsabilidade:** Encapsular o acesso ao PostgreSQL via Drizzle ORM (`postgres-js`), definindo as 10 tabelas fundamentais do Bloco 1.1, suas relações de consulta, migrations versionadas em SQL e o script de carga inicial idempotente.
 
 ---
@@ -99,7 +99,7 @@ Domínio 4 (engineering.ts)
 | `roles` | `id` UUID PK, `name` `UNIQUE`, `permissions` `JSONB` (default `{}`) | `roles_name_unique` |
 | `users` | `email` `UNIQUE`, `password_hash`, `approval_pin_hash`, `max_discount_pct` `NUMERIC(5,2)`, `commission_pct` `NUMERIC(5,2)`, `active` default `true` | FK `role_id -> roles.id` |
 | `price_tables` | `name` `UNIQUE`, `markup_multiplier` `NUMERIC(6,4)` default `'1.000'`, `default_discount_pct` `NUMERIC(5,2)` default `'0.00'` | `price_tables_name_unique` |
-| `customers` | `document_cpf_cnpj` `VARCHAR(14) UNIQUE`, `whatsapp_phone` `NOT NULL`, `billing_type` default `'AVISTA'`, `credit_limit` `NUMERIC(12,2)` | `CHECK person_type IN ('PF', 'PJ')`, `CHECK billing_type in ('AVISTA', 'FATURADO_MENSAL')`, índice `idx_customers_whatsapp_phone` |
+| `customers` | `document_cpf_cnpj` `VARCHAR(14) UNIQUE`, `whatsapp_phone` `NOT NULL`, `billing_type` default `'AVISTA'`, `credit_limit` `NUMERIC(12,2)`, `active` `BOOLEAN` default `true`, `deactivated_at` `TIMESTAMPTZ` | `CHECK person_type IN ('PF', 'PJ')`, `CHECK billing_type in ('AVISTA', 'FATURADO_MENSAL')`, índices `idx_customers_whatsapp_phone` e `idx_customers_active` |
 | `customer_phones` | `phone_e164` `VARCHAR(20) UNIQUE`, `customer_id` (`ON DELETE CASCADE`) | Índice `idx_customer_phones_e164` |
 | `customer_addresses` | `address_type` default `'AMBOS'`, `state` `CHAR(2)`, `default_delivery_fee` `NUMERIC(10,2)`, `customer_id` (`ON DELETE CASCADE`) | `CHECK address_type IN ('ENTREGA', 'COBRANCA', 'AMBOS')` |
 | `machines` | `unit_cost` `NUMERIC(10,4)`, `setup_cost` `NUMERIC(10,2)`, `max_width_mm`, `max_height_mm`, `gripper_margin_mm` default `10`, `current_odometer` `BIGINT` (`mode: 'number'`) | `CHECK sector IN ('PRE_IMPRESSÃO', 'DIGITAL', 'OFFSET', 'COM_VISUAL', 'ACABAMENTO')`, `CHECK billing_unit IN ('CLIQUE', 'HORA', 'M2')` |
@@ -130,6 +130,7 @@ Domínio 4 (engineering.ts)
 1. `0000_init_core_crm_engineering.sql` — Criação das 10 tabelas, PKs UUID, FKs, `CHECK`s e `idx_customers_whatsapp_phone`.
 2. `0001_fix_column_typos.sql` — `RENAME COLUMN` (`max_dicount_pct` → `max_discount_pct`, `comission_pct` → `commission_pct`, `max_heigth_mm` → `max_height_mm`) e correção de aspas em `customer_addresses_type_check`.
 3. `0002_add_customer_phones_index.sql` — Criação do índice `idx_customer_phones_e164`.
+4. `0003_add_customers_soft_deactivation.sql` — Adição de `active` (`DEFAULT true NOT NULL`), `deactivated_at` (`TIMESTAMPTZ`) e índice `idx_customers_active` na tabela `customers`.
 
 ---
 

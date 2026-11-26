@@ -8,6 +8,7 @@ export const PERMISSIONS_CATALOG = [
     { key: 'quote.approve_discount',    module: 'Comercial',    label: 'Autorizar descontos acima da alçada (PIN)', },
     { key: 'crm.manage',                module: 'CRM',          label: 'Cadastrar e editar clientes' },
     { key: 'crm.view',                  module: 'CRM',          label: 'Visualizar cadastro de clientes' },
+    { key: 'crm.delete',                module: 'CRM',          label: 'Excluir fisicamente clientes sem vinculo histórico'},
     { key: 'whatsapp.manage',           module: 'Atendimento',  label: 'Atender conversas no WhatsApp' },
     { key: 'artwork.manage',            module: 'Produção',     label: 'Subir provas digitais e validar preflight' },
     { key: 'production.view',           module: 'Produção',     label: 'Visualizar Kanban da fábrica' },

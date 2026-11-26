@@ -10,6 +10,7 @@ import {
   users,
 } from './schema';
 
+/** Gera hash salted no formato `scrypt:<salt>:<key>`, compatível com `PasswordService.verify` em `@soares/api`. */
 function hashSecret(plainText: string): string {
   const salt = randomBytes(16).toString('hex');
   const derivedKey = scryptSync(plainText, salt, 64).toString('hex');
@@ -84,6 +85,7 @@ async function seed() {
           'os.view_financial': true,
           'quote.create': true,
           'quote.approve_discount': true,
+          'crm.delete': true,
           'finance.manage': true,
           'engineering.manage': true,
         },

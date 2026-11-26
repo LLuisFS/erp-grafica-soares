@@ -8,7 +8,7 @@
   import { CustomersModule } from './modules/customers/customers.module';
   import { CustomersService, type LookupMatchSource } from './modules/customers/customers.service';
   ```
-- **Issue(s) relacionada(s):** Issue #4 (CRM Interno Fiscal, Deduplicação por Telefone/CPF-CNPJ e Lookup Omnichannel para WhatsApp)
+- **Issue(s) relacionada(s):** Issue #4 (CRM Interno Fiscal, Deduplicação por Telefone/CPF-CNPJ e Lookup Omnichannel para WhatsApp) e Issue #28 (Desativação Lógica `active`/`deactivated_at`, Reativação Automática por CPF/CNPJ e Exclusão Física Restrita `crm.delete`)
 - **Responsabilidade:** Gerenciar o cadastro fiscal e comercial completo de clientes (`customers`), telefones secundários (`customer_phones`) e endereços (`customer_addresses`) sem credenciais de login (RN02), oferecendo lookup rápido E.164/documento para o atendimento WhatsApp (RF02).
 
 ---
@@ -34,11 +34,11 @@
     ├── 2º Busca exata em customer_phones.phone_e164 ──► matchedBy = 'SECONDARY_PHONE'
     ├── 3º Busca exata em customers.document_cpf_cnpj──► matchedBy = 'DOCUMENT'
     ├── Se nenhum match                              ──► 404 NotFoundException
-    └── Carrega findById(customerId) + calcula isNewPhoneCustomer
-                                                      ──► { matchedBy, isNewPhoneCustomer, customer }
+    └── Carrega findById(customerId) + isNewPhoneCustomer + isInactive (!customer.active)
+                                                      ──► { matchedBy, isNewPhoneCustomer, isInactive, customer }
 ```
 
-### 2.2 Fluxo de Criação Transacional (`POST /customers`)
+### 2.2 Fluxo de Criação Transacional e Reativação Automática (`POST /customers`)
 
 ```text
   POST /customers { personType, name, whatsappPhone, phones?, addresses? }
@@ -48,7 +48,11 @@
         │
         ▼
   CustomersService.create(body, user.id)
-    ├─► Valida unicidade de documento e telefones (409 Conflict com existingCustomer)
+    ├─► Se documentCpfCnpj existe no banco:
+    │     ├── active === true  ──► 409 ConflictException (existingCustomerId + existingCustomer)
+    │     └── active === false ──► Valida telefones contra terceiros (ensurePhoneAvailable(..., existingByDoc.id))
+    │                              UPDATE active=true, deactivatedAt=null -> { ...reactivated, reactivated: true }
+    ├─► Valida unicidade de telefones (409 Conflict com existingCustomerId + isInactive)
     ├─► Resolve priceTableId (informado ou getDefaultPriceTableId -> primeira tabela ativa)
     ├─► db.transaction(async (tx) => ...)
     │     ├── INSERT customers (assignedUserId = input.assignedUserId ?? currentUserId)
@@ -66,7 +70,7 @@
 | `CustomersModule` | Classe (`@Module`) | `apps/api/src/modules/customers/customers.module.ts` | Registra `CustomersController` e `CustomersService`, exportando `CustomersService` para os futuros módulos de WhatsApp e Orçamentos. |
 | `LookupMatchSource` | `type` (união literal) | `apps/api/src/modules/customers/customers.service.ts` | Indica a origem do match no lookup: `'WHATSAPP_PRIMARY' \| 'SECONDARY_PHONE' \| 'DOCUMENT'`. |
 | `CustomersService` | Classe (`@Injectable`) | `apps/api/src/modules/customers/customers.service.ts` | Regras de negócio, deduplicação, lookup omnichannel, paginação e CRUD transacional de clientes, telefones e endereços. |
-| `CustomersController` | Classe (`@Controller('customers')`) | `apps/api/src/modules/customers/customers.controller.ts` | Expõe os 11 endpoints REST `/customers` com RBAC (`crm.view`/`crm.manage`), validação Zod e documentação Swagger. |
+| `CustomersController` | Classe (`@Controller('customers')`) | `apps/api/src/modules/customers/customers.controller.ts` | Expõe os 12 endpoints REST `/customers` com RBAC (`crm.view`/`crm.manage`/`crm.delete`), validação Zod e documentação Swagger. |
 
 ---
 
@@ -84,15 +88,18 @@ Todos os contratos de entrada e normalização consumidos por `CustomersControll
   {
     "message": "Este telefone já está cadastrado como WhatsApp principal de outro cliente.",
     "conflictField": "whatsappPhone",
+    "existingCustomerId": "uuid",
+    "isInactive": false,
     "existingCustomer": {
       "id": "uuid",
       "name": "Razão Social ou Nome",
       "documentCpfCnpj": "11222333000181",
-      "whatsappPhone": "5561998887766"
+      "whatsappPhone": "5561998887766",
+      "active": true
     }
   }
   ```
-  O campo `existingCustomer` permite à interface do atendente oferecer imediatamente o vínculo do cliente existente em vez de duplicar o cadastro.
+  Os campos `existingCustomerId`, `isInactive` e `existingCustomer` permitem à interface do atendente oferecer imediatamente o vínculo ou a reativação do cliente existente em vez de duplicar o cadastro.
 
 ---
 
@@ -105,10 +112,11 @@ Todos os contratos de entrada e normalização consumidos por `CustomersControll
   async lookup(query: LookupCustomerQuery): Promise<{
     matchedBy: LookupMatchSource;
     isNewPhoneCustomer: boolean;
+    isInactive: boolean;
     customer: Awaited<ReturnType<CustomersService['findById']>>;
   }>
   ```
-- **O que faz:** Executa busca em cascata (1. `customers.whatsapp_phone` → 2. `customer_phones.phone_e164` → 3. `customers.document_cpf_cnpj`). Quando o cliente é encontrado pelo documento usando um telefone ainda não cadastrado, devolve `isNewPhoneCustomer: true` para o painel sugerir `POST /customers/:id/phones`.
+- **O que faz:** Executa busca em cascata (1. `customers.whatsapp_phone` → 2. `customer_phones.phone_e164` → 3. `customers.document_cpf_cnpj`) **sem esconder clientes inativos**, retornando `isInactive: !customer.active` para orientar o atendimento. Quando o cliente é encontrado pelo documento usando um telefone ainda não cadastrado, devolve `isNewPhoneCustomer: true` para o painel sugerir `POST /customers/:id/phones`.
 - **Como implementar (exemplo futuro no webhook do WhatsApp):**
   ```ts
   const { matchedBy, isNewPhoneCustomer, customer } =
@@ -128,23 +136,25 @@ Todos os contratos de entrada e normalização consumidos por `CustomersControll
   async findById(id: string): Promise<CustomerWithRelations>
   ```
 - **O que faz:**
-  - `list`: aplica filtros opcionais (`personType`, `billingType`, `search` com `ILIKE` em `name`, `tradeName`, `email`, `whatsappPhone` e dígitos em `documentCpfCnpj`/`whatsappPhone`), executando `findMany` e `COUNT(*)` em paralelo via `Promise.all`.
+  - `list`: filtra automaticamente apenas clientes ativos (`eq(customers.active, true)`) quando `query.includeInactive` for `false` (padrão); aplica filtros opcionais (`personType`, `billingType`, `search` com `ILIKE` em `name`, `tradeName`, `email`, `whatsappPhone` e dígitos em `documentCpfCnpj`/`whatsappPhone`), executando `findMany` e `COUNT(*)` em paralelo via `Promise.all`.
   - `findById`: carrega `priceTable`, `assignedUser` (apenas `id`, `name`, `email` — nunca hashes), `phones` e `addresses`.
 - **Exceções / Status HTTP:** `404 NotFoundException` (`'Cliente não encontrado.'`) em `findById`.
 
-### 5.3 `CustomersService.create`, `update` e `remove`
+### 5.3 `CustomersService.create`, `update`, `updateStatus` e `remove`
 
 - **Assinaturas exatas:**
   ```ts
   async create(input: CreateCustomerInput, currentUserId: string)
   async update(id: string, input: UpdateCustomerInput)
+  async updateStatus(id: string, input: ToggleActiveStatusInput)
   async remove(id: string): Promise<{ deleted: true; id: string }>
   ```
 - **O que faz:**
-  - `create`: valida unicidade de documento/telefones, garante que nenhum telefone secundário repita `whatsappPhone`, busca `getDefaultPriceTableId()` se `priceTableId` não for informado e insere cliente + telefones + endereços dentro de `this.db.transaction(...)`.
-  - `update`: valida compatibilidade cruzada entre `nextPersonType` e `nextDocument`, checa unicidade ignorando o próprio `id` (`ne(customers.id, id)`) e atualiza `updatedAt = new Date()`.
-  - `remove`: confirma existência via `findById` e deleta o cliente (telefones e endereços são removidos por `ON DELETE CASCADE`).
-- **Exceções / Status HTTP:** `400 BadRequestException` (telefone duplicado no próprio payload, `PF`/`PJ` incompatível com documento ou nenhuma tabela de preço ativa), `404 NotFoundException`, `409 ConflictException` (CPF/CNPJ ou telefone já em uso).
+  - `create`: se `documentCpfCnpj` corresponder a um cliente **ativo**, lança `409`; se corresponder a um cliente **inativo**, valida que os telefones não pertencem a terceiros (`ensurePhoneAvailable(..., existingByDoc.id)`), reativa o registro (`active: true`, `deactivatedAt: null`) e retorna `{ ...reactivated, reactivated: true }`. Para clientes novos, valida unicidade de telefones, busca `getDefaultPriceTableId()` se `priceTableId` não for informado e insere cliente + telefones + endereços dentro de `this.db.transaction(...)`.
+  - `update`: valida compatibilidade cruzada entre `nextPersonType` e `nextDocument`, checa unicidade ignorando o próprio `id` (`ne(customers.id, id)`) e atualiza `updatedAt = new Date()` (sem expor `active`/`deactivatedAt`).
+  - `updateStatus`: rota dedicada (`PATCH /customers/:id/status`) que alterna `active` e grava `deactivatedAt` (`new Date()` ao desativar, `null` ao reativar).
+  - `remove`: confirma existência via `findById` e executa `DELETE` físico; se o PostgreSQL retornar violação de FK (`code === '23503'`, inclusive via `error.cause.code`), captura e lança `409 ConflictException` orientando o uso de `PATCH /customers/:id/status`.
+- **Exceções / Status HTTP:** `400 BadRequestException` (telefone duplicado no próprio payload, `PF`/`PJ` incompatível com documento ou nenhuma tabela de preço ativa), `404 NotFoundException`, `409 ConflictException` (CPF/CNPJ ativo, telefone já em uso ou cliente com histórico vinculado em `remove`).
 
 ### 5.4 Sub-recursos de Telefones e Endereços (`addPhone`, `removePhone`, `addAddress`, `updateAddress`, `removeAddress`)
 
@@ -164,11 +174,12 @@ Todos os contratos de entrada e normalização consumidos por `CustomersControll
 | Método e Rota | Permissão RBAC | Validação de Entrada | Descrição |
 | :--- | :--- | :--- | :--- |
 | `GET /customers/lookup` | `crm.view` *(ou `crm.manage`)* | `ZodValidationPipe(lookupCustomerQuerySchema)` | Busca rápida E.164 / CPF-CNPJ para WhatsApp (RF02). |
-| `GET /customers` | `crm.view` *(ou `crm.manage`)* | `ZodValidationPipe(listCustomersQuerySchema)` | Listagem paginada com busca e filtros. |
+| `GET /customers` | `crm.view` *(ou `crm.manage`)* | `ZodValidationPipe(listCustomersQuerySchema)` | Listagem paginada (somente ativos por padrão; aceita `?includeInactive=true`). |
 | `GET /customers/:id` | `crm.view` *(ou `crm.manage`)* | `ParseUUIDPipe` | Detalhe completo do cliente com relations. |
-| `POST /customers` | `crm.manage` | `ZodValidationPipe(createCustomerSchema)` + `@CurrentUser()` | Cadastra cliente PF/PJ + telefones/endereços em transação. |
-| `PATCH /customers/:id` | `crm.manage` | `ParseUUIDPipe` + `ZodValidationPipe(updateCustomerSchema)` | Atualização parcial cadastral/fiscal. |
-| `DELETE /customers/:id` | `crm.manage` | `ParseUUIDPipe` | Remove cliente (cascade em telefones e endereços). |
+| `POST /customers` | `crm.manage` | `ZodValidationPipe(createCustomerSchema)` + `@CurrentUser()` | Cadastra cliente PF/PJ em transação (ou reativa automaticamente se CPF/CNPJ estiver inativo). |
+| `PATCH /customers/:id` | `crm.manage` | `ParseUUIDPipe` + `ZodValidationPipe(updateCustomerSchema)` | Atualização parcial cadastral/fiscal (não altera `active`). |
+| `PATCH /customers/:id/status` | `crm.manage` | `ParseUUIDPipe` + `ZodValidationPipe(toggleActiveStatusSchema)` | Ativa ou desativa logicamente o cliente (`active` / `deactivated_at`). |
+| `DELETE /customers/:id` | `crm.delete` *(exclusivo Admin)* | `ParseUUIDPipe` | Exclui fisicamente apenas clientes sem histórico vinculado (`409` em FK `23503`). |
 | `POST /customers/:id/phones` | `crm.manage` | `ParseUUIDPipe` + `ZodValidationPipe(customerPhoneInputSchema)` | Vincula telefone secundário (`customer_phones`). |
 | `DELETE /customers/:id/phones/:phoneId` | `crm.manage` | `ParseUUIDPipe` (2x) | Remove telefone secundário do cliente. |
 | `POST /customers/:id/addresses` | `crm.manage` | `ParseUUIDPipe` + `ZodValidationPipe(customerAddressInputSchema)` | Adiciona endereço fiscal/entrega (`customer_addresses`). |
@@ -211,14 +222,16 @@ const match = await this.customersService.lookup({ phone: normalizedPhone });
 1. **Ordem da rota `@Get('lookup')` antes de `@Get(':id')`:** No `CustomersController`, `GET /customers/lookup` **precisa** vir declarada antes de `GET /customers/:id`. Caso contrário, o Express/NestJS capturaria `'lookup'` como parâmetro `:id` e o `ParseUUIDPipe` retornaria `400 Validation failed (uuid is expected)`.
 2. **Swagger com tipos inferidos do Zod (`@ApiBody` obrigatório):** Como `CreateCustomerInput`, `CustomerPhoneInput` e afins são `type` TypeScript (não classes), toda nova rota `POST`/`PATCH` no controller precisa de `@ApiBody({ schema: ... })` para exibir o editor JSON no Swagger `/docs`.
 3. **Interação com `FinancialSanitizerInterceptor`:** Campos como `creditLimit`, `defaultDeliveryFee`, `markupMultiplier` e `defaultDiscountPct` presentes nas respostas de `GET /customers` e `GET /customers/:id` são removidos automaticamente caso um perfil operacional sem `os.view_financial` acesse a rota.
-4. **Atenção na chamada de deduplicação de documento em `create`:** Verifique em `CustomersService.create` que `ensureDocumentAvailable(...)` receba `input.documentCpfCnpj` (e não `input.whatsappPhone`) para disparar o `409 Conflict` enriquecido antes da constraint `UNIQUE` do banco.
+4. **Proteção contra sequestro de telefone na reativação (`create`):** Ao reativar um cliente inativo pelo CPF/CNPJ, `ensurePhoneAvailable(phone, existingByDoc.id)` garante que o telefone informado não pertença a um terceiro (seja como WhatsApp principal ou secundário).
+5. **Tratamento de erro FK `23503` no Drizzle (`remove`):** O Drizzle ORM pode encapsular o `PostgresError` original dentro de `error.cause`; por isso o `catch` em `remove` verifica `error?.code ?? error?.cause?.code === '23503'` para garantir a resposta amigável `409 Conflict`.
 
 ### Base Teórica para TCC — Padrões de Engenharia de Software Aplicados
 
 | Padrão / Conceito | Onde é Aplicado | Benefício Arquitetural |
 | :--- | :--- | :--- |
 | **Atomicidade ACID (Unit of Work / Transaction)** | `this.db.transaction(...)` em `CustomersService.create` | Garante que cliente, telefones secundários e endereços iniciais sejam gravados em conjunto ou integralmente revertidos em caso de erro. |
+| **Soft Delete & Integridade Referencial Histórica** | `customers.active` / `deactivated_at` + `PATCH /customers/:id/status` + trava `23503` em `DELETE` | Preserva integridade fiscal/contábil de orçamentos, OSs e títulos vinculados, separando a desativação cotidiana (`crm.manage`) da exclusão física excepcional (`crm.delete`). |
 | **Hierarchical Permission Inheritance (RBAC)** | `RolesGuard` (`crm.manage` implica `crm.view`) | Reduz verbosidade na matriz de permissões dos cargos (`ATENDENTE` possui `crm.manage` e herda automaticamente leitura nas rotas `GET /customers`). |
 | **Prevenção de IDOR (Insecure Direct Object Reference)** | `and(eq(child.id, childId), eq(child.customerId, customerId))` | Impede que uma requisição manipule telefones ou endereços de outro cliente trocando apenas o UUID filho na URL. |
 | **Execução Concorrente de Consultas (`Promise.all`)** | `CustomersService.list` (`findMany` + `COUNT(*)`) | Reduz latência da listagem paginada executando dados e contagem total em paralelo no pool de conexões. |
-| **Rich Domain Conflict Responses (`409`)** | `ensureDocumentAvailable` / `ensurePhoneAvailable` | Transforma falhas de unicidade em respostas acionáveis (`conflictField` + `existingCustomer`) para o fluxo de atendimento omnichannel. |
+| **Rich Domain Conflict Responses (`409`)** | `ensureDocumentAvailable` / `ensurePhoneAvailable` | Transforma falhas de unicidade em respostas acionáveis (`conflictField`, `existingCustomerId`, `isInactive` e `existingCustomer`) para o fluxo de atendimento omnichannel. |

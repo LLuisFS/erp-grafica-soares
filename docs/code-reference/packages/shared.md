@@ -14,6 +14,7 @@
     verifyPinSchema,
     createCustomerSchema,
     updateCustomerSchema,
+    toggleActiveStatusSchema,
     lookupCustomerQuerySchema,
     listCustomersQuerySchema,
     onlyDigits,
@@ -24,9 +25,10 @@
     type LoginInput,
     type VerifyPinInput,
     type CreateCustomerInput,
+    type ToggleActiveStatusInput,
   } from '@soares/shared';
   ```
-- **Issue(s) relacionada(s):** Issue #1 (Workspace Shared), Issue #3 (Contratos Zod de Auth e Catálogo RBAC), Issue #4 (Schemas de CRM, Validação CPF/CNPJ e Normalização E.164) e Issue #6 (Consistência de Perfis/Permissões no Seed)
+- **Issue(s) relacionada(s):** Issue #1 (Workspace Shared), Issue #3 (Contratos Zod de Auth e Catálogo RBAC), Issue #4 (Schemas de CRM, Validação CPF/CNPJ e Normalização E.164), Issue #6 (Consistência de Perfis/Permissões no Seed) e Issue #28 (Desativação Lógica e Permissão `crm.delete`)
 - **Responsabilidade:** Centralizar a fonte única de verdade (SSOT) de contratos de validação Zod, catálogo de permissões RBAC e constantes de cargos compartilhados entre `@soares/api`, `@soares/database`, `@soares/pricing-engine`, `@soares/web` e `@soares/worker`.
 
 ---
@@ -60,8 +62,8 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | Símbolo Exportado | Tipo | Arquivo de Origem | Para que serve |
 | :--- | :--- | :--- | :--- |
 | `SYSTEM_NAME` | `const string` | `packages/shared/src/index.ts` | Nome canônico do sistema (`'ERP Gráfica Soares'`). |
-| `PERMISSIONS_CATALOG` | `const readonly array` | `packages/shared/src/permissions.ts` | Catálogo tipado (`as const`) das 13 chaves de permissão RBAC com módulo e rótulo em PT-BR. |
-| `PermissionKey` | `type` (união literal) | `packages/shared/src/permissions.ts` | União estrita das 13 chaves de `PERMISSIONS_CATALOG`, usada em `@RequirePermissions()` e `RolesGuard`. |
+| `PERMISSIONS_CATALOG` | `const readonly array` | `packages/shared/src/permissions.ts` | Catálogo tipado (`as const`) das 14 chaves de permissão RBAC com módulo e rótulo em PT-BR. |
+| `PermissionKey` | `type` (união literal) | `packages/shared/src/permissions.ts` | União estrita das 14 chaves de `PERMISSIONS_CATALOG`, usada em `@RequirePermissions()` e `RolesGuard`. |
 | `ROLE_NAMES` | `const readonly tuple` | `packages/shared/src/permissions.ts` | Lista fixa dos 6 cargos internos da gráfica (`roles.name`). |
 | `RoleName` | `type` (união literal) | `packages/shared/src/permissions.ts` | Tipo literal derivado de `ROLE_NAMES`. |
 | `FINANCIAL_RESTRICTED_ROLES` | `const readonly string[]` | `packages/shared/src/permissions.ts` | Perfis operacionais de fábrica bloqueados de visualizar valores financeiros no `FinancialSanitizerInterceptor`. |
@@ -73,7 +75,8 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | `phoneE164Schema`, `cpfCnpjSchema` | `ZodEffects` | `packages/shared/src/customers.schemas.ts` | Primitivos reutilizáveis para telefone E.164 (12–15 dígitos) e CPF/CNPJ válido. |
 | `customerPhoneInputSchema` / `CustomerPhoneInput` | `ZodObject` / `type` | `packages/shared/src/customers.schemas.ts` | Contrato de cadastro de telefones secundários (`customer_phones`). |
 | `customerAddressInputSchema` / `updateCustomerAddressSchema` | `ZodObject` / `type` | `packages/shared/src/customers.schemas.ts` | Contratos de criação e edição parcial de endereços (`customer_addresses`). |
-| `createCustomerSchema` / `updateCustomerSchema` | `ZodEffects` / `type` | `packages/shared/src/customers.schemas.ts` | Contratos de criação e atualização parcial de clientes com validação cruzada `PF`/`PJ` ↔ CPF/CNPJ. |
+| `createCustomerSchema` / `updateCustomerSchema` | `ZodEffects` / `type` | `packages/shared/src/customers.schemas.ts` | Contratos de criação e atualização parcial de clientes com validação cruzada `PF`/`PJ` ↔ CPF/CNPJ (sem `active`/`deactivatedAt`). |
+| `toggleActiveStatusSchema` / `ToggleActiveStatusInput` | `ZodObject` / `type` | `packages/shared/src/customers.schemas.ts` | Contrato dedicado de ativação/desativação lógica (`PATCH /customers/:id/status`). |
 | `lookupCustomerQuerySchema` / `listCustomersQuerySchema` | `ZodEffects` / `ZodObject` | `packages/shared/src/customers.schemas.ts` | Contratos de query string para lookup omnichannel (RF02) e listagem paginada do CRM. |
 
 ---
@@ -89,6 +92,7 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | `quote.approve_discount` | Comercial | Autorizar descontos acima da alçada (PIN gerencial no `AuthService.verifyPin`). |
 | `crm.manage` | CRM | Cadastrar e editar clientes. |
 | `crm.view` | CRM | Visualizar cadastro de clientes. |
+| `crm.delete` | CRM | Excluir fisicamente clientes sem vínculo histórico (exclusivo `ADMIN`). |
 | `whatsapp.manage` | Atendimento | Atender conversas no WhatsApp. |
 | `artwork.manage` | Produção | Subir provas digitais e validar preflight. |
 | `production.view` | Produção | Visualizar Kanban da fábrica. |
@@ -130,9 +134,10 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | `cpfCnpjSchema` | `.trim()` → `onlyDigits` → `11` ou `14` dígitos → `isValidCpfOrCnpj` (rejeita sequências repetidas e valida dígitos verificadores) | Salva sempre apenas dígitos em `customers.document_cpf_cnpj`. |
 | `customerAddressInputSchema` | `addressType` (`ENTREGA\|COBRANCA\|AMBOS`), `zipCode` (`onlyDigits`, exatos 8 dígitos), `state` (`.toUpperCase()` + `/^[A-Z]{2}$/`), `defaultDeliveryFee` (`Number(v).toFixed(2)`, `>= 0`) | Defaults: `addressType: 'AMBOS'`, `defaultDeliveryFee: '0.00'`. |
 | `createCustomerSchema` | Campos de `customers` + arrays opcionais `phones` e `addresses` + `.superRefine` cruzando `personType` (`PF` = 11 dígitos; `PJ` = 14 dígitos) | Defaults: `billingType: 'AVISTA'`, `creditLimit: '0.00'`, `phones: []`, `addresses: []`. |
-| `updateCustomerSchema` | Todos os campos opcionais + `.superRefine` validando `personType` ↔ `documentCpfCnpj` quando ambos são enviados | Usado em `PATCH /customers/:id`. |
+| `updateCustomerSchema` | Todos os campos opcionais + `.superRefine` validando `personType` ↔ `documentCpfCnpj` quando ambos são enviados; omite intencionalmente `active`/`deactivatedAt` | Usado em `PATCH /customers/:id`. |
+| `toggleActiveStatusSchema` | `active: z.boolean(...)` obrigatório com mensagens customizadas (`required_error`, `invalid_type_error`) | Usado exclusivamente em `PATCH /customers/:id/status`. |
 | `lookupCustomerQuerySchema` | `phone` (`normalizePhoneE164`, opcional) e `document` (`onlyDigits`, opcional) + `.refine` exigindo ao menos um dos dois | Usado em `GET /customers/lookup` (RF02). |
-| `listCustomersQuerySchema` | `search` (opcional), `personType`, `billingType`, `page` (`z.coerce.number().int().min(1)`), `limit` (`min(1).max(100)`) | Defaults: `page: 1`, `limit: 20`. |
+| `listCustomersQuerySchema` | `search` (opcional), `personType`, `billingType`, `page` (`z.coerce.number().int().min(1)`), `limit` (`min(1).max(100)`), `includeInactive` (`boolean \| 'true' \| 'false'` → `boolean`) | Defaults: `page: 1`, `limit: 20`, `includeInactive: false`. |
 
 ---
 

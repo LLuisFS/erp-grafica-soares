@@ -102,29 +102,30 @@ export const cpfCnpjSchema = z
     .refine(isValidCpfOrCnpj, 'CPF ou CNPJ com dígito verificador inválido.');
 
 /** Contrato Zod para cadastro de endereço fiscal/entrega (`customer_addresses`), normalizando CEP (8 dígitos), UF e taxa de entrega. */
-export const customerAddressInputSchema = z.object({
-    addressType: z.enum(['ENTREGA', 'COBRANCA', 'AMBOS']).default('AMBOS'),
-    zipCode: z
-        .string()
-        .trim()
-        .transform(onlyDigits)
-        .refine((val) => val.length === 8, 'CEP deve conter exatamente 8 dígitos.'),
-    street: z.string().trim().min(2, 'Logradouro obrigatório').max(160),
-    number: z.string().trim().min(1, 'Número obrigatório (use S/N se não houver)').max(20),
-    complement: z.string().trim().max(80).optional().nullable(),
-    neighborhood: z.string().trim().min(2, 'Bairro obrigatório').max(80),
-    city: z.string().trim().min(2, 'Cidade obrigatória').max(80),
-    state: z
-        .string()
-        .trim()
-        .toUpperCase()
-        .regex(/^[A-Z]{2}$/, 'UF deve conter 2 letras (ex: GO, DF).'),
-    defaultDeliveryFee: z
-        .union([z.number(), z.string()])
-        .transform((v) => Number(v).toFixed(2))
-        .refine((v) => !Number.isNaN(Number(v)) && Number(v) >= 0, 'Taxa de entrega inválida')
-        .default('0.00'),
-});
+export const customerAddressInputSchema = z
+    .object({
+        addressType: z.enum(['ENTREGA', 'COBRANCA', 'AMBOS']).default('AMBOS'),
+        zipCode: z
+            .string()
+            .trim()
+            .transform(onlyDigits)
+            .refine((val) => val.length === 8, 'CEP deve conter exatamente 8 dígitos.'),
+        street: z.string().trim().min(2, 'Logradouro obrigatório').max(160),
+        number: z.string().trim().min(1, 'Número obrigatório (use S/N se não houver)').max(20),
+        complement: z.string().trim().max(80).optional().nullable(),
+        neighborhood: z.string().trim().min(2, 'Bairro obrigatório').max(80),
+        city: z.string().trim().min(2, 'Cidade obrigatória').max(80),
+        state: z
+            .string()
+            .trim()
+            .toUpperCase()
+            .regex(/^[A-Z]{2}$/, 'UF deve conter 2 letras (ex: GO, DF).'),
+        defaultDeliveryFee: z
+            .union([z.number(), z.string()])
+            .transform((v) => Number(v).toFixed(2))
+            .refine((v) => !Number.isNaN(Number(v)) && Number(v) >= 0, 'Taxa de entrega inválida')
+            .default('0.00'),
+    });
 
 export type CustomerAddressInput = z.infer<typeof customerAddressInputSchema>;
 
@@ -133,10 +134,11 @@ export const updateCustomerAddressSchema = customerAddressInputSchema.partial();
 export type UpdateCustomerAddressInput = z.infer<typeof updateCustomerAddressSchema>;
 
 /** Contrato Zod para vínculos adicionais de WhatsApp/telefone do cliente (`customer_phones`). */
-export const customerPhoneInputSchema = z.object({
-    phoneE164: phoneE164Schema,
-    label: z.string().trim().max(40).optional().nullable(),
-});
+export const customerPhoneInputSchema = z.
+    object({
+        phoneE164: phoneE164Schema,
+        label: z.string().trim().max(40).optional().nullable(),
+    });
 
 export type CustomerPhoneInput = z.infer<typeof customerPhoneInputSchema>;
 
@@ -191,7 +193,10 @@ export const createCustomerSchema = z
 
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 
-/** Contrato de atualização parcial de cliente (`customers`), preservando a consistência entre `personType` e `documentCpfCnpj`. */
+/**
+ * Contrato de atualização parcial de cliente (`customers`), preservando a consistência entre `personType` e `documentCpfCnpj`.
+ * Omite intencionalmente `active`/`deactivatedAt`, controlados exclusivamente por `toggleActiveStatusSchema`.
+ */
 export const updateCustomerSchema = z
     .object({
         priceTableId: baseCustomerFields.priceTableId,
@@ -228,6 +233,17 @@ export const updateCustomerSchema = z
 
 export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;
 
+/** Contrato dedicado para ativação/desativação lógica (`PATCH /customers/:id/status`), preservando histórico fiscal. */
+export const toggleActiveStatusSchema = z
+    .object({
+        active: z.boolean({
+            required_error: 'O campo active é obrigatório.',
+            invalid_type_error: 'O campo active deve ser booleano.',
+        }),
+    });
+
+export type ToggleActiveStatusInput = z.infer<typeof toggleActiveStatusSchema>;
+
 /**
  * Query de busca rápida por telefone E.164 ou CPF/CNPJ (usada no vínculo automático do atendimento WhatsApp — RF02).
  * Exige ao menos um dos dois parâmetros para evitar varredura sem filtro.
@@ -252,13 +268,19 @@ export const lookupCustomerQuerySchema = z
 
 export type LookupCustomerQuery = z.infer<typeof lookupCustomerQuerySchema>;
 
-/** Query paginada de listagem de clientes com filtros por texto, `personType` e `billingType`. */
-export const listCustomersQuerySchema = z.object({
-    search: z.string().trim().optional(),
-    personType: z.enum(['PF', 'PJ']).optional(),
-    billingType: z.enum(['AVISTA', 'FATURADO_MENSAL']).optional(),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
-});
+/** Query paginada de listagem de clientes com filtros por texto, `personType`, `billingType` e `includeInactive` (padrão `false`). */
+export const listCustomersQuerySchema = z
+    .object({
+        search: z.string().trim().optional(),
+        personType: z.enum(['PF', 'PJ']).optional(),
+        billingType: z.enum(['AVISTA', 'FATURADO_MENSAL']).optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(100).default(20),
+        includeInactive: z
+            .union([z.boolean(), z.enum(['true', 'false'])])
+            .transform((val) => val === true || val === 'true')
+            .optional()
+            .default(false),
+    });
 
 export type ListCustomersQuery = z.infer<typeof listCustomersQuerySchema>;
