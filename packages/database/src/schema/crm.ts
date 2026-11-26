@@ -21,11 +21,12 @@ export const priceTables = pgTable('price_tables', {
     name: varchar('name', { length: 80 }).notNull().unique(),
     markupMultiplier: numeric('markup_multiplier', { precision: 6, scale: 4 })
         .notNull()
-        .default('1.000'),
+        .default('1.0000'),
     defaultDiscountPct: numeric('default_discount_pct', { precision: 5, scale: 2 })
         .notNull()
         .default('0.00'),
     active: boolean('active').notNull().default(true),
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
 });
 
 // 2.2 customers

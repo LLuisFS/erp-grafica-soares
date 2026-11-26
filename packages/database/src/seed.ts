@@ -88,6 +88,7 @@ async function seed() {
           'crm.delete': true,
           'finance.manage': true,
           'engineering.manage': true,
+          'engineering.delete': true,
         },
       },
       {

@@ -90,6 +90,7 @@ Perfis de precificação aplicados automaticamente conforme a categoria do clien
 | `markup_multiplier` | `NUMERIC(6,4)` (default `1.0000`) | Não | Fator multiplicador aplicado pelo `@soares/pricing-engine` sobre o custo base (ex.: `1.0000` balcão, `0.8500` revenda). |
 | `default_discount_pct` | `NUMERIC(5,2)` (default `0.00`) | Não | Desconto padrão pré-aplicado para clientes vinculados a esta tabela. |
 | `active` | `BOOLEAN` (default `true`) | Não | Permite descontinuar tabelas antigas sem afetar clientes existentes. |
+| `deactivated_at` | `TIMESTAMPTZ` | Sim | Timestamp da última desativação lógica via `PATCH /engineering/price-tables/:id/status` (`NULL` quando ativa). |
 
 ---
 
@@ -274,6 +275,7 @@ Cadastro técnico dos equipamentos de impressão e acabamento (ex.: Epson WF-C53
 | `gripper_margin_mm` | `INTEGER` (default `10`) | Não | Margem de pinça não imprimível descontada pelo algoritmo de imposição antes de calcular quantas peças cabem na folha. |
 | `current_odometer` | `BIGINT` (default `0`) | Não | Contador acumulado de cliques/metros da máquina. |
 | `active` | `BOOLEAN` (default `true`) | Não | Indica se o equipamento está disponível para novos orçamentos. |
+| `deactivated_at` | `TIMESTAMPTZ` | Sim | Timestamp da última desativação lógica via `PATCH /engineering/machines/:id/status` (`NULL` quando ativa). |
 
 ---
 
@@ -297,6 +299,7 @@ Papéis, lonas, vinis, chapas rígidas, tintas e embalagens com conversão autom
 | `stock_qty` | `NUMERIC(12,4)` (default `0`) | Não | Saldo físico atual na `consumption_unit`. |
 | `min_stock_qty` | `NUMERIC(12,4)` (default `0`) | Não | Ponto de reposição que dispara alerta de compra. |
 | `active` | `BOOLEAN` (default `true`) | Não | Status ativo no catálogo. |
+| `deactivated_at` | `TIMESTAMPTZ` | Sim | Timestamp da última desativação lógica via `PATCH /engineering/materials/:id/status` (`NULL` quando ativo). |
 
 ---
 
@@ -315,6 +318,7 @@ Catálogo de acabamentos internos ou terceirizados (laminação, verniz, corte, 
 | `is_outsourced` | `BOOLEAN` (default `false`) | Não | Sinaliza se o serviço é executado fora da gráfica por um parceiro. |
 | `default_supplier_id` | `UUID` | Sim | Fornecedor padrão quando `is_outsourced = true` (recebe FK na Fase 2). |
 | `active` | `BOOLEAN` (default `true`) | Não | Disponibilidade no configurador de orçamento. |
+| `deactivated_at` | `TIMESTAMPTZ` | Sim | Timestamp da última desativação lógica via `PATCH /engineering/finishing-services/:id/status` (`NULL` quando ativo). |
 
 ---
 
@@ -333,6 +337,8 @@ Gabaritos pré-configurados de produtos recorrentes para agilizar o preenchiment
 | `default_height_mm` | `INTEGER` | Não | Altura final padrão da peça em mm. |
 | `bleed_mm` | `INTEGER` (default `3`) | Não | Sangria padrão em mm somada em cada lado no cálculo de imposição. |
 | `spacing_mm` | `INTEGER` (default `2`) | Não | Espaçamento de corte (calha) entre peças na folha. |
+| `active` | `BOOLEAN` (default `true`) | Não | Controle de desativação lógica; omitido da listagem padrão quando `false`. |
+| `deactivated_at` | `TIMESTAMPTZ` | Sim | Timestamp da última desativação lógica via `PATCH /engineering/product-templates/:id/status` (`NULL` quando ativo). |
 
 ---
 

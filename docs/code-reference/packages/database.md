@@ -20,7 +20,7 @@
     type RolePermissions,
   } from '@soares/database';
   ```
-- **Issue(s) relacionada(s):** Issue #2 (Modelagem Drizzle Bloco 1.1, Índices e Migrations), Issue #6 (Seed Idempotente da Gráfica Soares) e Issue #28 (Desativação Lógica em `customers` e Permissão `crm.delete`)
+- **Issue(s) relacionada(s):** Issue #2 (Modelagem Drizzle Bloco 1.1, Índices e Migrations), Issue #5 (Soft Deactivation em Engenharia e `engineering.delete`), Issue #6 (Seed Idempotente da Gráfica Soares) e Issue #28 (Desativação Lógica em `customers` e Permissão `crm.delete`)
 - **Responsabilidade:** Encapsular o acesso ao PostgreSQL via Drizzle ORM (`postgres-js`), definindo as 10 tabelas fundamentais do Bloco 1.1, suas relações de consulta, migrations versionadas em SQL e o script de carga inicial idempotente.
 
 ---
@@ -98,14 +98,14 @@ Domínio 4 (engineering.ts)
 | :--- | :--- | :--- |
 | `roles` | `id` UUID PK, `name` `UNIQUE`, `permissions` `JSONB` (default `{}`) | `roles_name_unique` |
 | `users` | `email` `UNIQUE`, `password_hash`, `approval_pin_hash`, `max_discount_pct` `NUMERIC(5,2)`, `commission_pct` `NUMERIC(5,2)`, `active` default `true` | FK `role_id -> roles.id` |
-| `price_tables` | `name` `UNIQUE`, `markup_multiplier` `NUMERIC(6,4)` default `'1.000'`, `default_discount_pct` `NUMERIC(5,2)` default `'0.00'` | `price_tables_name_unique` |
+| `price_tables` | `name` `UNIQUE`, `markup_multiplier` `NUMERIC(6,4)` default `'1.0000'`, `default_discount_pct` `NUMERIC(5,2)` default `'0.00'`, `active` default `true`, `deactivated_at` `TIMESTAMPTZ` | `price_tables_name_unique` |
 | `customers` | `document_cpf_cnpj` `VARCHAR(14) UNIQUE`, `whatsapp_phone` `NOT NULL`, `billing_type` default `'AVISTA'`, `credit_limit` `NUMERIC(12,2)`, `active` `BOOLEAN` default `true`, `deactivated_at` `TIMESTAMPTZ` | `CHECK person_type IN ('PF', 'PJ')`, `CHECK billing_type in ('AVISTA', 'FATURADO_MENSAL')`, índices `idx_customers_whatsapp_phone` e `idx_customers_active` |
 | `customer_phones` | `phone_e164` `VARCHAR(20) UNIQUE`, `customer_id` (`ON DELETE CASCADE`) | Índice `idx_customer_phones_e164` |
 | `customer_addresses` | `address_type` default `'AMBOS'`, `state` `CHAR(2)`, `default_delivery_fee` `NUMERIC(10,2)`, `customer_id` (`ON DELETE CASCADE`) | `CHECK address_type IN ('ENTREGA', 'COBRANCA', 'AMBOS')` |
-| `machines` | `unit_cost` `NUMERIC(10,4)`, `setup_cost` `NUMERIC(10,2)`, `max_width_mm`, `max_height_mm`, `gripper_margin_mm` default `10`, `current_odometer` `BIGINT` (`mode: 'number'`) | `CHECK sector IN ('PRE_IMPRESSÃO', 'DIGITAL', 'OFFSET', 'COM_VISUAL', 'ACABAMENTO')`, `CHECK billing_unit IN ('CLIQUE', 'HORA', 'M2')` |
-| `materials` | `sku` `UNIQUE`, `conversion_factor` / `unit_cost` / `stock_qty` / `min_stock_qty` em `NUMERIC(12,4)` | `CHECK category IN ('PAPEL', 'LONA_VINIL', 'CHAPA_RIGIDA', 'TINTA_INSUMO', 'EMBALAGEM')` |
-| `finishing_services` | `setup_cost` `NUMERIC(10,2)`, `unit_cost` `NUMERIC(10,4)`, `default_supplier_id` UUID nullable **sem FK** (preparado para Fase 2) | `CHECK calc_basis IN ('POR_UNIDADE', 'POR_FOLHA', 'POR_M2', 'FIXO_SETUP')` |
-| `product_templates` | `default_width_mm`, `default_height_mm`, `bleed_mm` default `3`, `spacing_mm` default `2` | `CHECK category IN ('DIGITAL', 'OFFSET', 'COM_VISUAL')` |
+| `machines` | `unit_cost` `NUMERIC(10,4)`, `setup_cost` `NUMERIC(10,2)`, `max_width_mm`, `max_height_mm`, `gripper_margin_mm` default `10`, `current_odometer` `BIGINT` (`mode: 'number'`), `active` default `true`, `deactivated_at` `TIMESTAMPTZ` | `CHECK sector IN ('PRE_IMPRESSAO', 'DIGITAL', 'OFFSET', 'COM_VISUAL', 'ACABAMENTO')`, `CHECK billing_unit IN ('CLIQUE', 'HORA', 'M2')` |
+| `materials` | `sku` `UNIQUE`, `conversion_factor` / `unit_cost` / `stock_qty` / `min_stock_qty` em `NUMERIC(12,4)`, `active` default `true`, `deactivated_at` `TIMESTAMPTZ` | `CHECK category IN ('PAPEL', 'LONA_VINIL', 'CHAPA_RIGIDA', 'TINTA_INSUMO', 'EMBALAGEM')` |
+| `finishing_services` | `setup_cost` `NUMERIC(10,2)`, `unit_cost` `NUMERIC(10,4)`, `default_supplier_id` UUID nullable **sem FK** (preparado para Fase 2), `active` default `true`, `deactivated_at` `TIMESTAMPTZ` | `CHECK calc_basis IN ('POR_UNIDADE', 'POR_FOLHA', 'POR_M2', 'FIXO_SETUP')` |
+| `product_templates` | `default_width_mm`, `default_height_mm`, `bleed_mm` default `3`, `spacing_mm` default `2`, `active` default `true`, `deactivated_at` `TIMESTAMPTZ` | `CHECK category IN ('DIGITAL', 'OFFSET', 'COM_VISUAL')` |
 
 ### 4.3 Variáveis e Dados do Seed Idempotente (`src/seed.ts`)
 
@@ -131,6 +131,7 @@ Domínio 4 (engineering.ts)
 2. `0001_fix_column_typos.sql` — `RENAME COLUMN` (`max_dicount_pct` → `max_discount_pct`, `comission_pct` → `commission_pct`, `max_heigth_mm` → `max_height_mm`) e correção de aspas em `customer_addresses_type_check`.
 3. `0002_add_customer_phones_index.sql` — Criação do índice `idx_customer_phones_e164`.
 4. `0003_add_customers_soft_deactivation.sql` — Adição de `active` (`DEFAULT true NOT NULL`), `deactivated_at` (`TIMESTAMPTZ`) e índice `idx_customers_active` na tabela `customers`.
+5. `0004_add_engineering_soft_deactivation.sql` — Adição de `deactivated_at` em `price_tables`, `machines`, `materials`, `finishing_services` e `product_templates`, adição de `active` em `product_templates`, default `'1.0000'` em `price_tables.markup_multiplier` e padronização de `machines_sector_check` para `'PRE_IMPRESSAO'`.
 
 ---
 
@@ -214,7 +215,7 @@ Domínio 4 (engineering.ts)
 
 1. **Nunca use `Float` / `doublePrecision` para dinheiro ou custos unitários:** O projeto adota `numeric(..., { precision, scale })` (que retorna `string` no Drizzle) — `scale: 4` para custos unitários de clique/folha/$m^2$ e `scale: 2` para totais financeiros — eliminando erros de ponto flutuante IEEE-754 em tiragens altas.
 2. **Sempre mantenha `prepare: false` no `postgres-js`:** Sem isso, ao alternar para o Transaction Pooler do Supabase (PgBouncer porta `6543`), consultas subsequentes falham com erro de *prepared statement already exists*.
-3. **Atenção ao `CHECK` com acento em `machines.sector`:** O valor definido em `engineering.ts` linha 35 é `'PRE_IMPRESSÃO'` (com acento). Ao inserir máquinas desse setor, utilize o valor exato ou alinhe via migration se optar por remover o acento.
+3. **`machines_sector_check` padronizado sem acento (`'PRE_IMPRESSAO'`):** A migration `0004` corrigiu o antigo valor `'PRE_IMPRESSÃO'` para `'PRE_IMPRESSAO'`, garantindo alinhamento total com `machineSectorEnum` em `@soares/shared`.
 4. **Idempotência no `seed.ts`:** Como tabelas como `machines` e `finishing_services` não possuem `UNIQUE` em `name`, a idempotência depende dos **UUIDs determinísticos** em `IDS` combinados com `.onConflictDoNothing()`. Nunca troque esses UUIDs por `defaultRandom()` dentro do seed.
 5. **Compatibilidade CommonJS + ESM em `env.ts`:** Evite `import.meta.url` dentro de `packages/database/src/`, pois o pacote é importado em formato `.ts` diretamente pelo `@soares/api` (`CommonJS`). Use `findRepoRoot` baseado em `__dirname` / `process.cwd()`.
 

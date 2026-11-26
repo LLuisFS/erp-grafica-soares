@@ -2,7 +2,7 @@
 
 ## 1. Cabeçalho Técnico
 
-- **Caminho no repositório:** `packages/shared/src/` (`index.ts`, `permissions.ts`, `auth.schemas.ts`, `customers.schemas.ts`)
+- **Caminho no repositório:** `packages/shared/src/` (`index.ts`, `permissions.ts`, `auth.schemas.ts`, `customers.schemas.ts`, `engineering.schemas.ts`)
 - **Forma de importação:**
   ```ts
   import {
@@ -17,6 +17,10 @@
     toggleActiveStatusSchema,
     lookupCustomerQuerySchema,
     listCustomersQuerySchema,
+    listEngineeringQuerySchema,
+    createMachineSchema,
+    createMaterialSchema,
+    adjustMaterialStockSchema,
     onlyDigits,
     normalizePhoneE164,
     isValidCpfOrCnpj,
@@ -26,9 +30,10 @@
     type VerifyPinInput,
     type CreateCustomerInput,
     type ToggleActiveStatusInput,
+    type CreateMaterialInput,
   } from '@soares/shared';
   ```
-- **Issue(s) relacionada(s):** Issue #1 (Workspace Shared), Issue #3 (Contratos Zod de Auth e Catálogo RBAC), Issue #4 (Schemas de CRM, Validação CPF/CNPJ e Normalização E.164), Issue #6 (Consistência de Perfis/Permissões no Seed) e Issue #28 (Desativação Lógica e Permissão `crm.delete`)
+- **Issue(s) relacionada(s):** Issue #1 (Workspace Shared), Issue #3 (Contratos Zod de Auth e Catálogo RBAC), Issue #4 (Schemas de CRM, Validação CPF/CNPJ e Normalização E.164), Issue #5 (Schemas de Engenharia Gráfica e Permissões `engineering.view`/`engineering.delete`), Issue #6 (Consistência de Perfis/Permissões no Seed) e Issue #28 (Desativação Lógica e Permissão `crm.delete`)
 - **Responsabilidade:** Centralizar a fonte única de verdade (SSOT) de contratos de validação Zod, catálogo de permissões RBAC e constantes de cargos compartilhados entre `@soares/api`, `@soares/database`, `@soares/pricing-engine`, `@soares/web` e `@soares/worker`.
 
 ---
@@ -37,9 +42,10 @@
 
 ```text
                 packages/shared/src/index.ts (Barrel Export)
-                     ├── permissions.ts       (Catálogo RBAC + Cargos)
-                     ├── auth.schemas.ts      (Contratos Zod de Login e PIN)
-                     └── customers.schemas.ts (CPF/CNPJ, E.164 e CRUD CRM)
+                     ├── permissions.ts         (Catálogo RBAC + Cargos)
+                     ├── auth.schemas.ts        (Contratos Zod de Login e PIN)
+                     ├── customers.schemas.ts   (CPF/CNPJ, E.164 e CRUD CRM)
+                     └── engineering.schemas.ts (Tabelas, Máquinas, Materiais, Acabamentos e Gabaritos)
                                      │
           ┌──────────────────────────┼──────────────────────────┐
           │                          │                          │
@@ -62,8 +68,8 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | Símbolo Exportado | Tipo | Arquivo de Origem | Para que serve |
 | :--- | :--- | :--- | :--- |
 | `SYSTEM_NAME` | `const string` | `packages/shared/src/index.ts` | Nome canônico do sistema (`'ERP Gráfica Soares'`). |
-| `PERMISSIONS_CATALOG` | `const readonly array` | `packages/shared/src/permissions.ts` | Catálogo tipado (`as const`) das 14 chaves de permissão RBAC com módulo e rótulo em PT-BR. |
-| `PermissionKey` | `type` (união literal) | `packages/shared/src/permissions.ts` | União estrita das 14 chaves de `PERMISSIONS_CATALOG`, usada em `@RequirePermissions()` e `RolesGuard`. |
+| `PERMISSIONS_CATALOG` | `const readonly array` | `packages/shared/src/permissions.ts` | Catálogo tipado (`as const`) das 16 chaves de permissão RBAC com módulo e rótulo em PT-BR. |
+| `PermissionKey` | `type` (união literal) | `packages/shared/src/permissions.ts` | União estrita das 16 chaves de `PERMISSIONS_CATALOG`, usada em `@RequirePermissions()` e `RolesGuard`. |
 | `ROLE_NAMES` | `const readonly tuple` | `packages/shared/src/permissions.ts` | Lista fixa dos 6 cargos internos da gráfica (`roles.name`). |
 | `RoleName` | `type` (união literal) | `packages/shared/src/permissions.ts` | Tipo literal derivado de `ROLE_NAMES`. |
 | `FINANCIAL_RESTRICTED_ROLES` | `const readonly string[]` | `packages/shared/src/permissions.ts` | Perfis operacionais de fábrica bloqueados de visualizar valores financeiros no `FinancialSanitizerInterceptor`. |
@@ -78,6 +84,12 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | `createCustomerSchema` / `updateCustomerSchema` | `ZodEffects` / `type` | `packages/shared/src/customers.schemas.ts` | Contratos de criação e atualização parcial de clientes com validação cruzada `PF`/`PJ` ↔ CPF/CNPJ (sem `active`/`deactivatedAt`). |
 | `toggleActiveStatusSchema` / `ToggleActiveStatusInput` | `ZodObject` / `type` | `packages/shared/src/customers.schemas.ts` | Contrato dedicado de ativação/desativação lógica (`PATCH /customers/:id/status`). |
 | `lookupCustomerQuerySchema` / `listCustomersQuerySchema` | `ZodEffects` / `ZodObject` | `packages/shared/src/customers.schemas.ts` | Contratos de query string para lookup omnichannel (RF02) e listagem paginada do CRM. |
+| `listEngineeringQuerySchema` | `ZodObject` / `type` | `packages/shared/src/engineering.schemas.ts` | Query de listagem dos 5 recursos de engenharia (`search` e `includeInactive`, padrão `false`). |
+| `createPriceTableSchema` / `updatePriceTableSchema` | `ZodObject` / `type` | `packages/shared/src/engineering.schemas.ts` | Contratos de criação e atualização `.strict()` de tabelas comerciais de preço. |
+| `machineSectorEnum`, `machineBillingUnitEnum`, `createMachineSchema`, `updateMachineSchema`, `updateMachineMeterSchema` | Enums / `ZodObject` | `packages/shared/src/engineering.schemas.ts` | Contratos de equipamentos (`machines`) e leitura dedicada de hodômetro (`readingValue`). |
+| `materialCategoryEnum`, `createMaterialSchema`, `updateMaterialSchema`, `adjustMaterialStockSchema` | Enum / `ZodEffects` / `ZodObject` | `packages/shared/src/engineering.schemas.ts` | Contratos de insumos (`materials`) com `purchasePrice`/`unitCost` e ajuste manual de saldo (`qtyDelta`, `reason`). |
+| `finishingCalcBasisEnum`, `createFinishingServiceSchema`, `updateFinishingServiceSchema` | Enum / `ZodObject` | `packages/shared/src/engineering.schemas.ts` | Contratos de acabamentos (`finishing_services`). |
+| `productCategoryEnum`, `createProductTemplateSchema`, `updateProductTemplateSchema` | Enum / `ZodObject` | `packages/shared/src/engineering.schemas.ts` | Contratos de gabaritos de produto (`product_templates`). |
 
 ---
 
@@ -100,7 +112,9 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | `production.manage` | Produção | Gerenciar prioridades e fila de PCP. |
 | `os.view_financial` | Financeiro | Visualizar preços, custos e margens (exigida para não acionar sanitização financeira). |
 | `finance.manage` | Financeiro | Gerenciar cobranças, baixas manuais e caixa. |
+| `engineering.view` | Engenharia | Visualizar máquinas, materiais, acabamentos, gabaritos e tabelas de preço (herdada automaticamente por `engineering.manage`). |
 | `engineering.manage` | Engenharia | Editar máquinas, materiais e tabelas de preço. |
+| `engineering.delete` | Engenharia | Excluir fisicamente cadastros de engenharia sem vínculo histórico (exclusivo `ADMIN`). |
 
 ### 4.2 Cargos Internos (`ROLE_NAMES`) e Restrição Financeira (`FINANCIAL_RESTRICTED_ROLES`)
 
@@ -138,6 +152,17 @@ Como `packages/shared/package.json` define `"exports": { ".": { "types": "./src/
 | `toggleActiveStatusSchema` | `active: z.boolean(...)` obrigatório com mensagens customizadas (`required_error`, `invalid_type_error`) | Usado exclusivamente em `PATCH /customers/:id/status`. |
 | `lookupCustomerQuerySchema` | `phone` (`normalizePhoneE164`, opcional) e `document` (`onlyDigits`, opcional) + `.refine` exigindo ao menos um dos dois | Usado em `GET /customers/lookup` (RF02). |
 | `listCustomersQuerySchema` | `search` (opcional), `personType`, `billingType`, `page` (`z.coerce.number().int().min(1)`), `limit` (`min(1).max(100)`), `includeInactive` (`boolean \| 'true' \| 'false'` → `boolean`) | Defaults: `page: 1`, `limit: 20`, `includeInactive: false`. |
+
+### 4.5 Schemas Zod de Engenharia Gráfica (`engineering.schemas.ts`)
+
+| Schema | Regras de Validação e Sanitização | Defaults / Blindagens |
+| :--- | :--- | :--- |
+| `listEngineeringQuerySchema` | `search` (`.trim()`, opcional) e `includeInactive` (`boolean \| 'true' \| 'false'` → `boolean`) | Default: `includeInactive: false`. |
+| `createPriceTableSchema` / `updatePriceTableSchema` | `name` (2–80), `markupMultiplier > 0`, `defaultDiscountPct` (`0..100`) | Defaults: `markupMultiplier: 1`, `defaultDiscountPct: 0`; `update` usa `.strict()`. |
+| `createMachineSchema` / `updateMachineSchema` / `updateMachineMeterSchema` | `sector`, `billingUnit`, `unitCost > 0`, `maxWidthMm > 0`, `maxHeightMm > 0`; `readingValue >= 0` | Defaults: `setupCost: 0`, `setupWasteSheets: 0`, `gripperMarginMm: 10`, `currentOdometer: 0`; `update` omite `currentOdometer` e usa `.strict()`. |
+| `createMaterialSchema` / `updateMaterialSchema` / `adjustMaterialStockSchema` | `conversionFactor > 0`, `.refine` exigindo `purchasePrice > 0` ou `unitCost > 0`; `qtyDelta !== 0` e `reason` (3–160) | Defaults: `stockQty: 0`, `minStockQty: 0`; `update` omite `stockQty` e usa `.strict()`. |
+| `createFinishingServiceSchema` / `updateFinishingServiceSchema` | `name`, `calcBasis`, `setupCost >= 0`, `unitCost >= 0`, `machineId`/`defaultSupplierId` UUID opcionais | Defaults: `setupCost: 0`, `isOutsourced: false`; `update` usa `.strict()`. |
+| `createProductTemplateSchema` / `updateProductTemplateSchema` | `name`, `category`, `defaultWidthMm > 0`, `defaultHeightMm > 0`, `defaultMachineId`/`defaultMaterialId` UUID opcionais | Defaults: `bleedMm: 3`, `spacingMm: 2`; `update` usa `.strict()`. |
 
 ---
 

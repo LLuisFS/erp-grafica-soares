@@ -8,7 +8,7 @@ export const PERMISSIONS_CATALOG = [
     { key: 'quote.approve_discount',    module: 'Comercial',    label: 'Autorizar descontos acima da alçada (PIN)', },
     { key: 'crm.manage',                module: 'CRM',          label: 'Cadastrar e editar clientes' },
     { key: 'crm.view',                  module: 'CRM',          label: 'Visualizar cadastro de clientes' },
-    { key: 'crm.delete',                module: 'CRM',          label: 'Excluir fisicamente clientes sem vinculo histórico'},
+    { key: 'crm.delete',                module: 'CRM',          label: 'Excluir fisicamente clientes sem vínculo histórico'},
     { key: 'whatsapp.manage',           module: 'Atendimento',  label: 'Atender conversas no WhatsApp' },
     { key: 'artwork.manage',            module: 'Produção',     label: 'Subir provas digitais e validar preflight' },
     { key: 'production.view',           module: 'Produção',     label: 'Visualizar Kanban da fábrica' },
@@ -16,7 +16,9 @@ export const PERMISSIONS_CATALOG = [
     { key: 'production.manage',         module: 'Produção',     label: 'Gerenciar prioridades e fila de PCP' },
     { key: 'os.view_financial',         module: 'Financeiro',   label: 'Visualizar preços, custos e margens' },
     { key: 'finance.manage',            module: 'Financeiro',   label: 'Gerenciar cobranças, baixas manuais e caixa', },
+    { key: 'engineering.view',          module: 'Engenharia',   label: 'Visualizar máquinas, materiais, acabamentos, gabaritos e tabelas de preço', },
     { key: 'engineering.manage',        module: 'Engenharia',   label: 'Editar máquinas, materiais e tabelas de preço', },
+    { key: 'engineering.delete',        module: 'Engenharia',   label: 'Excluir fisicamente cadastros de engenharia sem vínculo histórico', },
 ] as const;
 
 /** União literal das chaves válidas de permissão, garantindo tipagem estrita nos guards e controllers. */

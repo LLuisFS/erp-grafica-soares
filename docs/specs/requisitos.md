@@ -71,7 +71,7 @@
 
 ### Módulo F: Estoque, Insumos & Compras
 
-- **RF28 — Conversão de Unidades de Compra vs. Consumo `[MVP]`:** Cadastro de materiais permitindo entrada em unidades comerciais (`RESMA_500`, `BOBINA_50M`, `LITRO`) e cálculo/baixa fracionada (`FOLHA`, `M2`, `METRO_LINEAR`, `ML`) via `conversion_factor`.
+- **RF28 — Conversão de Unidades de Compra vs. Consumo `[MVP]`:** Cadastro de materiais permitindo entrada em unidades comerciais (`RESMA_500`, `BOBINA_50M`, `LITRO`) e cálculo/baixa fracionada (`FOLHA`, `M2`, `METRO_LINEAR`, `ML`) via `conversion_factor`, com cálculo automático de `unit_cost = purchasePrice / conversionFactor` na API (4 casas decimais) e rota dedicada de ajuste manual de saldo (`POST /engineering/materials/:id/stock-adjustment`) impedindo estoque negativo.
 - **RF29 — Baixa Automática de Matéria-Prima `[Fase 2]`:** Ao concluir a etapa de impressão da OS, abater automaticamente do estoque (`stock_movements`) o substrato calculado na ficha técnica somado à quebra de setup.
 - **RF30 — Entrada de Notas via XML (NF-e) `[Fase 2]`:** Importação de XML de fornecedores (`purchase_invoices`) para atualizar saldo em estoque, custo unitário e gerar contas a pagar automaticamente.
 - **RF31 — Controle de Retalhos Aproveitáveis `[Fase 3]`:** Cadastro de sobras utilizáveis de bobinas e chapas rígidas (`material_remnants`) com dimensões e localização física para reaproveitamento prioritário em novos orçamentos.

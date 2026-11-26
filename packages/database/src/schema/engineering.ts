@@ -6,6 +6,7 @@ import {
     integer,
     numeric,
     pgTable,
+    timestamp,
     uuid,
     varchar,
 } from 'drizzle-orm/pg-core';
@@ -28,11 +29,12 @@ export const machines = pgTable(
         gripperMarginMm: integer('gripper_margin_mm').notNull().default(10),
         currentOdometer: bigint('current_odometer', { mode: 'number' }).notNull().default(0),
         active: boolean('active').notNull().default(true),
+        deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
     },
     (table) => [
         check(
             'machines_sector_check',
-            sql`${table.sector} IN ('PRE_IMPRESSÃO', 'DIGITAL', 'OFFSET', 'COM_VISUAL', 'ACABAMENTO')`,
+            sql`${table.sector} IN ('PRE_IMPRESSAO', 'DIGITAL', 'OFFSET', 'COM_VISUAL', 'ACABAMENTO')`,
         ),
         check(
             'machine_billing_unit_check',
@@ -59,6 +61,7 @@ export const materials = pgTable(
     stockQty: numeric('stock_qty', { precision: 12, scale: 4 }).notNull().default('0'),
     minStockQty: numeric('min_stock_qty', { precision: 12, scale: 4 }).notNull().default('0'),
     active: boolean('active').notNull().default(true),
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
   },
   (table) => [
     check(
@@ -82,6 +85,7 @@ export const finishingServices = pgTable(
     // Mantida nullable sem FK até a criação da tabela suppliers na Fase 2
     defaultSupplierId: uuid('default_supplier_id'),
     active: boolean('active').notNull().default(true),
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
   },
   (table) => [
     check(
@@ -104,6 +108,8 @@ export const productTemplates = pgTable(
     defaultHeightMm: integer('default_height_mm').notNull(),
     bleedMm: integer('bleed_mm').notNull().default(3),
     spacingMm: integer('spacing_mm').notNull().default(2),
+    active: boolean('active').notNull().default(true),
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
   },
   (table) => [
     check(

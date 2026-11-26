@@ -29,6 +29,13 @@
       "when": 1795704173452,
       "tag": "0003_add_customers_soft_deactivation",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795708015038,
+      "tag": "0004_add_engineering_soft_deactivation",
+      "breakpoints": true
     }
   ]
 }
